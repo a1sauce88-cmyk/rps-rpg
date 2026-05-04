@@ -3,32 +3,35 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-    <title>가위바위보 왕국 RPG</title>
+    <title>가위바위보 히어로 키우기</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <style>
         @import url('https://fonts.googleapis.com/css2?family=Gowun+Dodum&family=Jua&display=swap');
         
         body {
             font-family: 'Gowun Dodum', sans-serif;
-            background-color: #0f172a;
+            background-color: #000;
             color: #f8fafc;
             touch-action: manipulation;
             margin: 0;
             padding: 0;
-            overflow: hidden;
             width: 100vw;
             height: 100dvh;
+            overflow: hidden;
+            display: flex;
+            align-items: center;
+            justify-content: center;
         }
         h1, h2, h3, .title-font {
             font-family: 'Jua', sans-serif;
         }
         
         @keyframes shake {
-            0% { transform: translateX(0); }
-            25% { transform: translateX(-5px); }
-            50% { transform: translateX(5px); }
-            75% { transform: translateX(-5px); }
-            100% { transform: translateX(0); }
+            0% { transform: translateX(0) scale(1); }
+            25% { transform: translateX(-5px) scale(1); }
+            50% { transform: translateX(5px) scale(1); }
+            75% { transform: translateX(-5px) scale(1); }
+            100% { transform: translateX(0) scale(1); }
         }
         .anim-shake { animation: shake 0.3s ease-in-out; }
         
@@ -37,6 +40,15 @@
             to { opacity: 1; }
         }
         .fade-in { animation: fadeIn 0.4s ease-in-out; }
+
+        @keyframes slowFadeIn {
+            0% { opacity: 0; transform: translateY(20px); }
+            100% { opacity: 1; transform: translateY(0); }
+        }
+        .fade-in-slow { 
+            opacity: 0; 
+            animation: slowFadeIn 2s ease-out forwards; 
+        }
 
         @keyframes float-up {
             0% { transform: translateY(0) scale(0.8); opacity: 1; font-weight: bold; }
@@ -76,49 +88,50 @@
         }
 
         @media screen and (orientation: portrait) {
-            #portrait-warning { display: flex; }
-            #main-wrapper { display: none !important; }
+            #portrait-warning { display: flex !important; }
+            #game-container { display: none !important; }
         }
     </style>
 </head>
-<body class="text-slate-100 flex flex-col">
+<body>
 
-    <!-- 세로 화면(Portrait) 경고 오버레이 -->
+    <!-- 세로 화면 경고창 -->
     <div id="portrait-warning">
         <div class="text-[120px] mb-6 anim-bubble">🔄</div>
         <h1 class="text-5xl font-bold text-yellow-400 mb-6 title-font drop-shadow-md break-keep px-4">기기를 눕혀주세요!</h1>
         <p class="text-2xl text-slate-300 leading-relaxed px-6 break-keep">이 게임은 <span class="font-bold text-white">가로 화면</span>에 최적화되어 있습니다.<br>스마트폰을 회전하여 플레이해 주세요.</p>
     </div>
 
-    <!-- 스케일링이 적용되는 메인 래퍼 -->
-    <div id="main-wrapper" class="w-full h-full flex flex-col items-center justify-center relative bg-black overflow-hidden">
-        <!-- 1280x720 고정 캔버스 -->
-        <div id="game-container" class="relative bg-slate-900 overflow-hidden shrink-0 shadow-[0_0_50px_rgba(0,0,0,0.8)]" style="width: 1280px; height: 720px;">
-            <!-- JS 렌더링 영역 -->
-        </div>
+    <!-- 1280x720 고정 스케일링 캔버스 -->
+    <div id="game-container" class="relative bg-slate-900 shadow-[0_0_50px_rgba(0,0,0,0.8)] shrink-0" style="width: 1280px; height: 720px; transform-origin: center center;">
+        <!-- JS 렌더링 영역 -->
     </div>
 
 <script>
 // --- 화면 스케일링 (1280x720 비율 고정, 한 화면에 꽉 차게) ---
 function adjustScale() {
     const container = document.getElementById('game-container');
+    if (!container) return;
+
     const winW = window.innerWidth;
     const winH = window.innerHeight;
     const targetW = 1280;
     const targetH = 720;
     
-    // 가로/세로 중 더 많이 축소해야 하는 비율을 선택해 화면 안에 무조건 들어가게 처리
+    // 가로/세로 중 더 많이 축소해야 하는 비율을 선택해 화면 안에 무조건 핏(Fit) 되게 처리
     let scale = Math.min(winW / targetW, winH / targetH);
     
-    // PC에서는 최대 크기 제한 (지나치게 커지지 않도록)
+    // PC에서는 최대 크기(1280x720) 제한
     if (scale > 1) scale = 1; 
 
     container.style.transform = `scale(${scale})`;
-    container.style.transformOrigin = 'center center';
 }
 
 window.addEventListener('resize', adjustScale);
-window.addEventListener('orientationchange', () => setTimeout(adjustScale, 100));
+window.addEventListener('orientationchange', () => {
+    setTimeout(adjustScale, 100);
+    setTimeout(adjustScale, 300);
+});
 
 // --- 세이브 & 로드 (LocalStorage) ---
 function saveGame() {
@@ -131,46 +144,68 @@ function loadGame() {
         state = JSON.parse(saved);
         state.lastRenderedScreen = ''; 
         AudioEngine.init();
-        if(state.screen === 'battle' || state.screen === 'tacticSelect') {
-            const trackIdx = state.currentRegion >= 4 ? 3 : state.currentRegion - 1; 
-            AudioEngine.setTrack(trackIdx);
+        
+        // 로드된 화면에 맞는 BGM 재생
+        if (state.screen === 'ending') {
+            AudioEngine.playBGM('ending');
+        } else if (['title', 'prologue', 'difficultySelect', 'classSelect'].includes(state.screen)) {
+            AudioEngine.playBGM('title');
+        } else {
+            AudioEngine.playBGM(`stage${state.currentRegion}`);
         }
         render();
     }
 }
 
-// --- 오디오 매니저 ---
+// --- 오디오 매니저 (MP3 배경음악 + 8비트 효과음) ---
 const AudioEngine = {
-    ctx: null, bgmInterval: null, muted: true, noteIndex: 0, currentTrack: 0,
-    bgmTracks: [
-        [261.6, 329.6, 392.0, 523.3, 392.0, 329.6, 261.6, 196.0], 
-        [146.8, 164.8, 174.6, 220.0, 174.6, 164.8, 146.8, 110.0], 
-        [329.6, 349.2, 415.3, 493.9, 415.3, 349.2, 329.6, 246.9], 
-        [130.8, 146.8, 130.8, 98.0,  130.8, 146.8, 130.8, 98.0]   
-    ],
+    ctx: null, 
+    muted: true, 
+    currentTrack: '', 
+    bgmAudio: new Audio(), // HTML5 Audio 객체 사용
     
     init() {
         if(!this.ctx) {
             this.ctx = new (window.AudioContext || window.webkitAudioContext)();
             this.muted = false;
-            this.startBGM();
+            this.bgmAudio.loop = true; // BGM 무한 반복
+            this.playBGM('title');
         } else if (this.ctx.state === 'suspended') {
             this.ctx.resume();
         }
     },
     toggle() {
         this.muted = !this.muted;
-        if(this.muted) { clearInterval(this.bgmInterval); } 
-        else { this.startBGM(); }
+        if(this.muted) { 
+            this.bgmAudio.pause();
+        } else { 
+            if (this.currentTrack) {
+                this.bgmAudio.play().catch(e => console.log("Audio play error:", e));
+            }
+        }
         render();
     },
-    setTrack(trackIndex) {
-        if (this.currentTrack !== trackIndex) {
-            this.currentTrack = Math.max(0, Math.min(trackIndex, this.bgmTracks.length - 1));
-            if (!this.muted) this.startBGM(); 
+    playBGM(trackName) {
+        if (this.currentTrack === trackName) return; // 이미 같은 곡이 재생 중이면 무시
+        this.currentTrack = trackName;
+        
+        let src = '';
+        if (trackName === 'title') src = './assets_audio/bgm_title.mp3';
+        else if (trackName === 'stage1') src = './assets_audio/bgm_stage1.mp3';
+        else if (trackName === 'stage2') src = './assets_audio/bgm_stage2.mp3';
+        else if (trackName === 'stage3') src = './assets_audio/bgm_stage3.mp3';
+        else if (trackName === 'stage4') src = './assets_audio/bgm_stage4.mp3';
+        else if (trackName === 'stage5') src = './assets_audio/bgm_stage5.mp3';
+        else if (trackName === 'ending') src = './assets_audio/bgm_end.mp3';
+        
+        this.bgmAudio.src = src;
+        
+        if (!this.muted) {
+            this.bgmAudio.play().catch(e => console.log("Audio play error:", e));
         }
     },
     playTone(freq, type, duration, vol=0.1) {
+        // 기존 타격음, 효과음 로직 유지
         if(!this.ctx || this.muted) return;
         const osc = this.ctx.createOscillator();
         const gain = this.ctx.createGain();
@@ -182,17 +217,6 @@ const AudioEngine = {
         gain.connect(this.ctx.destination);
         osc.start();
         osc.stop(this.ctx.currentTime + duration);
-    },
-    startBGM() {
-        if(this.bgmInterval) clearInterval(this.bgmInterval);
-        this.noteIndex = 0; 
-        this.bgmInterval = setInterval(() => {
-            if(!this.muted && this.ctx) {
-                const notes = this.bgmTracks[this.currentTrack];
-                this.playTone(notes[this.noteIndex], 'triangle', 0.2, 0.03);
-                this.noteIndex = (this.noteIndex + 1) % notes.length;
-            }
-        }, 250);
     },
     sfx: {
         hit() { AudioEngine.playTone(150, 'sawtooth', 0.2, 0.15); },
@@ -271,6 +295,7 @@ const ACHIEVEMENTS_LIST = [
     { id: 'maxUpgrade', name: '⚒️ 전설의 장인', desc: '상점에서 장비 하나를 에픽 등급까지 강화했다!' }
 ];
 
+// 게임 밸런스 조정: 총 2,550 골드로 에픽 풀 업그레이드 가능하도록 조정
 const UPGRADES = {
     weapon: [
         { level: 1, name: '일반: 강철 검 🗡️', desc: '공격력 +4', price: 60, atk: 4 },
@@ -309,11 +334,11 @@ const SHOP_ITEMS = {
 };
 
 const REGIONS = [
-    { id: 1, name: '🌳 제1장: 숲속', desc: '울창하고 기운찬 숲속. 여정의 첫걸음을 내딛습니다.', bg: 'bg1.png' },
-    { id: 2, name: '🏰 제2장: 왕국 도성', desc: '웅장한 도성의 입구. 무장한 병력들이 길을 막아섭니다.', bg: 'bg2.png' },
-    { id: 3, name: '🍷 제3장: 연회장', desc: '화려한 연회장. 아름다움 속에 치명적인 함정이 도사리고 있습니다.', bg: 'bg3.png' },
-    { id: 4, name: '👑 제4장: 왕실 내부', desc: '왕실의 깊숙한 곳. 마왕을 수호하는 강력한 정예병들이 기다립니다.', bg: 'bg4.png' },
-    { id: 5, name: '👿 제5장: 왕좌', desc: '마침내 도달한 왕좌. 모든 것의 원흉, 마왕과의 마지막 결전입니다.', bg: 'bg5.png' }
+    { id: 1, name: '🌳 제1장: 숲속', desc: '왕국의 변방 숲에 이상한 기운이 퍼졌다.<br>작은 몬스터들이 길을 막고,<br>첫 번째 승부가 시작된다.', bg: 'bg1.png' },
+    { id: 2, name: '🏰 제2장: 왕국 도성', desc: '도성의 문은 굳게 닫혔다.<br>한때 왕국을 지키던 병사들이<br>이제는 히어로의 앞을 막아선다.', bg: 'bg2.png' },
+    { id: 3, name: '🍷 제3장: 연회장', desc: '불빛은 화려하지만,<br>그림자는 더욱 짙어졌다.<br>웃음소리가 사라진 연회장에<br>수상한 마법이 흐른다.', bg: 'bg3.png' },
+    { id: 4, name: '👑 제4장: 왕실 내부', desc: '왕좌에 가까워질수록<br>승부의 규칙은 뒤틀리기 시작했다.<br>남은 것은 왕실의 마지막 수호자들뿐.', bg: 'bg4.png' },
+    { id: 5, name: '👿 제5장: 왕좌', desc: '드디어 마왕의 왕좌에 도착했다.<br>모든 승부를 무승부로 되돌리려는 자,<br>무승부의 마왕이 기다리고 있다.', bg: 'bg5.png' }
 ];
 
 const MONSTERS = [
@@ -439,6 +464,12 @@ function determineMonsterMove() {
 function startGame() {
     AudioEngine.init();
     AudioEngine.sfx.select();
+    state.screen = 'prologue';
+    render();
+}
+
+function goToDifficulty() {
+    AudioEngine.sfx.select();
     state.screen = 'difficultySelect';
     render();
 }
@@ -480,7 +511,7 @@ function checkRegionStart() {
     else { startTacticSelect(); return; }
     
     const trackIdx = state.currentRegion >= 4 ? 3 : state.currentRegion - 1; 
-    AudioEngine.setTrack(trackIdx);
+    AudioEngine.playBGM(`stage${state.currentRegion}`);
     render();
 }
 
@@ -521,6 +552,7 @@ function startBattle() {
     addLog(`STAGE ${state.stage + 1}: ${state.monster.name} 등장!`, 'bad');
     addLog(`"${state.monster.dialogue}"`, 'normal');
     
+    // 소비 아이템 자동 사용
     if (state.player.inventory.candy > 0) {
         state.player.energy = Math.min(state.player.maxEnergy, state.player.energy + 2);
         state.player.inventory.candy--; addLog(`🍬 집중의 사탕: 기력 +2`, 'info');
@@ -617,7 +649,13 @@ function upgradeEquip(type) {
         }
         
         saveGame();
-        render(); 
+        let msgEl = $('shop-msg');
+        if(msgEl) {
+            msgEl.innerText = `${nextUpgrade.name} 업그레이드 완료!`;
+            msgEl.classList.remove('fade-in'); void msgEl.offsetWidth; msgEl.classList.add('fade-in');
+            setTimeout(() => { if($('shop-msg')) $('shop-msg').innerText = ''; }, 2000);
+        }
+        render();
     }
 }
 
@@ -634,6 +672,12 @@ function buyItem(itemId, tab) {
 
         saveGame();
         render(); 
+        const msgEl = $('shop-msg');
+        if(msgEl) {
+            msgEl.innerText = msgStr;
+            msgEl.classList.remove('fade-in'); void msgEl.offsetWidth; msgEl.classList.add('fade-in');
+            setTimeout(() => { if($('shop-msg')) $('shop-msg').innerText = ''; }, 2000);
+        }
     }
 }
 
@@ -899,7 +943,7 @@ function processBattleVictory() {
 
     if (state.player.hp === 1 && !state.achievements.survive1Hp) {
         state.achievements.survive1Hp = true;
-        addLog("🏆 칭찬 스티커: 기적의 생존자 달성!", 'good');
+        addLog("🏆 업적 달성: 기적의 생존자 달성!", 'good');
     }
     if (!state.player.firstDmgTaken) { unlockAchievement('perfectWin'); }
 
@@ -927,6 +971,7 @@ function processBattleVictory() {
     state.stage++;
     if (state.stage >= MONSTERS.length) {
         state.screen = 'ending';
+        AudioEngine.playBGM('ending');
     } else {
         let availableAugs = AUGMENTS.filter(a => !hasAug(a.id) && !state.player.seenAugments.includes(a.id));
         if (availableAugs.length < 3) {
@@ -959,6 +1004,7 @@ function restartGame() {
     AudioEngine.sfx.select();
     state.screen = 'title';
     SHOP_ITEMS.buff.forEach(i => i.bought = false);
+    AudioEngine.playBGM('title');
     render();
 }
 
@@ -985,13 +1031,30 @@ function render() {
                 <div class="absolute inset-0 bg-slate-900/70 z-0"></div>
                 <div class="z-10 relative flex flex-col items-center justify-center w-full">
                     <div class="text-[120px] mb-6 drop-shadow-xl">✌️✊✋</div>
-                    <h1 class="text-[80px] font-bold text-yellow-400 mb-8 title-font drop-shadow-lg leading-tight text-center">가위바위보 왕국 RPG</h1>
+                    <h1 class="text-[80px] font-bold text-yellow-400 mb-8 title-font drop-shadow-lg leading-tight text-center">가위바위보 히어로 키우기</h1>
                     <p class="text-slate-300 mb-6 text-3xl font-bold drop-shadow">총 5개의 지역, 20개의 스테이지!</p>
                     <p class="text-slate-200 mb-14 text-2xl leading-relaxed text-balance drop-shadow-md text-center">단순한 가위바위보가 아닙니다.<br>전투 기술을 구사하고 적의 심리를 읽어내세요!</p>
                     <div class="flex flex-row gap-6 w-full justify-center">
                         <button onclick="startGame()" class="bg-blue-600 hover:bg-blue-500 text-white font-bold py-6 px-16 rounded-3xl shadow-2xl border-b-8 border-blue-800 active:border-b-0 active:mt-2 transition-all text-4xl">새 모험 시작</button>
                         ${canLoad ? `<button onclick="loadGame()" class="bg-green-600 hover:bg-green-500 text-white font-bold py-6 px-16 rounded-3xl shadow-2xl border-b-8 border-green-800 active:border-b-0 active:mt-2 transition-all text-4xl">이어서 하기</button>` : ''}
                     </div>
+                </div>
+            </div>
+        `;
+    }
+    else if (state.screen === 'prologue') {
+        html = audioBtn + `
+            <div class="w-full h-full flex flex-col items-center justify-center bg-black relative p-6 cursor-pointer" onclick="goToDifficulty()">
+                <div class="max-w-4xl w-full text-center space-y-8">
+                    <p class="text-4xl text-slate-200 leading-loose fade-in-slow" style="animation-delay: 0.5s;">먼 옛날, 세 가지 힘으로 지켜지던 왕국이 있었다.</p>
+                    <div class="text-3xl text-slate-300 leading-loose fade-in-slow" style="animation-delay: 2.5s;">
+                        <p>베어내는 힘, <span class="text-red-400 font-bold">가위</span>.</p>
+                        <p>막아내는 힘, <span class="text-yellow-400 font-bold">바위</span>.</p>
+                        <p>감싸는 힘, <span class="text-blue-400 font-bold">보</span>.</p>
+                    </div>
+                    <p class="text-4xl text-slate-200 leading-loose fade-in-slow" style="animation-delay: 4.5s;">세 힘의 균형이 무너진 밤,<br>왕좌에는 무승부의 마왕이 나타났다.</p>
+                    <p class="text-5xl text-yellow-400 font-bold title-font leading-loose fade-in-slow" style="animation-delay: 6.5s;">이제 왕국을 구할 히어로를 선택하라.</p>
+                    <p class="text-xl text-slate-500 mt-12 animate-pulse fade-in-slow" style="animation-delay: 8.5s;">화면을 터치하여 계속...</p>
                 </div>
             </div>
         `;
@@ -1024,7 +1087,7 @@ function render() {
                 <div class="absolute inset-0 bg-slate-900/80 z-0"></div>
                 <div class="z-10 relative flex flex-col justify-center h-full py-12 w-full max-w-7xl mx-auto px-6">
                     <h2 class="text-6xl text-center text-yellow-400 mb-12 title-font drop-shadow-md">직업 선택</h2>
-                    <div class="flex-1 grid grid-cols-3 gap-8 w-full">
+                    <div class="flex-1 grid grid-cols-3 gap-8 w-full pb-4">
                         ${Object.keys(CLASSES).map(key => `
                             <button onclick="selectClass('${key}')" class="bg-slate-800/80 backdrop-blur-md hover:bg-slate-700 p-8 rounded-3xl border-4 border-slate-500 flex flex-col items-center text-center transition-all hover:-translate-y-2 shadow-2xl group focus:outline-none h-full">
                                 <img src="./assets_hero/${CLASSES[key].imgPrefix}_idle.png" class="border-4 border-slate-500 rounded-3xl shrink-0 mb-6 group-hover:border-yellow-400 transition-colors shadow-inner bg-white object-cover" style="width: 200px; height: 200px; image-rendering: pixelated;" alt="${CLASSES[key].name}">
@@ -1046,11 +1109,11 @@ function render() {
             <div class="w-full h-full flex flex-col items-center justify-center ${transitionClass} bg-cover bg-center relative" style="background-image: url('${bgImage}');">
                 <div class="absolute inset-0 bg-slate-900/70 z-0"></div>
                 <div class="z-10 relative flex flex-col items-center justify-center w-full px-6">
-                    <h2 class="text-7xl font-bold text-green-400 mb-12 title-font drop-shadow-lg text-center break-keep">${region.name}</h2>
-                    <div class="bg-slate-800/80 backdrop-blur-md p-12 rounded-3xl border-4 border-slate-500 shadow-2xl mb-16 max-w-4xl w-full text-center">
-                        <p class="text-slate-200 text-3xl leading-relaxed text-balance drop-shadow">${region.desc}</p>
+                    <h2 class="text-7xl font-bold text-green-400 mb-12 title-font drop-shadow-lg text-center break-keep fade-in-slow" style="animation-delay: 0.5s;">${region.name}</h2>
+                    <div class="bg-transparent p-8 mb-16 max-w-4xl w-full text-center">
+                        <p class="text-slate-200 text-4xl leading-loose text-balance drop-shadow-md font-bold fade-in-slow" style="animation-delay: 2s;">${region.desc}</p>
                     </div>
-                    <button onclick="startTacticSelect()" class="bg-blue-600 hover:bg-blue-500 text-white font-bold py-6 px-24 rounded-3xl shadow-xl border-b-8 border-blue-800 active:border-b-0 active:mt-2 transition-all text-4xl">진입하기</button>
+                    <button onclick="startTacticSelect()" class="bg-blue-600 hover:bg-blue-500 text-white font-bold py-6 px-24 rounded-3xl shadow-xl border-b-8 border-blue-800 active:border-b-0 active:mt-2 transition-all text-4xl fade-in-slow" style="animation-delay: 4.5s;">진입하기</button>
                 </div>
             </div>
         `;
@@ -1065,11 +1128,22 @@ function render() {
             </button>
         `).join('');
 
-        html = audioBtn + `
+        let warningHtml = '';
+        if ([3, 7, 11, 15].includes(state.stage)) {
+            warningHtml = `<div class="absolute top-10 left-1/2 transform -translate-x-1/2 w-full text-center z-20 pointer-events-none fade-in">
+                <h2 class="text-7xl font-bold text-red-500 animate-pulse drop-shadow-[0_0_15px_rgba(239,68,68,0.8)] tracking-widest title-font">WARNING! BOSS BATTLE</h2>
+            </div>`;
+        } else if (state.stage === 19) {
+            warningHtml = `<div class="absolute top-10 left-1/2 transform -translate-x-1/2 w-full text-center z-20 pointer-events-none fade-in">
+                <h2 class="text-8xl font-bold text-yellow-500 animate-pulse drop-shadow-[0_0_20px_rgba(234,179,8,0.8)] tracking-widest title-font">FINAL BATTLE</h2>
+            </div>`;
+        }
+
+        html = audioBtn + warningHtml + `
             <div class="w-full h-full flex flex-col items-center justify-center ${transitionClass} bg-cover bg-center relative" style="background-image: url('${bgImage}');">
                 <div class="absolute inset-0 bg-slate-900/80 z-0"></div>
                 <div class="z-10 relative flex flex-col h-full items-center justify-center w-full max-w-6xl mx-auto px-6">
-                    <div class="text-center mb-12">
+                    <div class="text-center mb-12 mt-12">
                         <div class="text-2xl text-red-300 font-bold mb-4 tracking-widest bg-red-900/50 inline-block px-4 py-2 rounded-full border border-red-500/50 backdrop-blur-sm">STAGE ${state.stage + 1}</div>
                         <div class="text-[120px] mb-6 drop-shadow-2xl opacity-90">${mon.icon}</div>
                         <h2 class="text-6xl font-bold text-white title-font drop-shadow-lg mb-4 break-keep">야생의 ${mon.name} 발견!</h2>
@@ -1234,7 +1308,7 @@ function render() {
         html = audioBtn + `
             <div class="w-full h-full flex flex-col items-center justify-center ${transitionClass} bg-cover bg-center relative" style="background-image: url('${bgImage}');">
                 <div class="absolute inset-0 bg-slate-900/70 z-0"></div>
-                <div class="z-10 relative flex flex-col items-center justify-center min-h-full py-12 px-6 w-full max-w-6xl mx-auto">
+                <div class="z-10 relative flex flex-col items-center justify-center w-full max-w-6xl mx-auto">
                     <div class="text-center mb-16">
                         <h2 class="text-6xl font-bold text-yellow-400 title-font mb-6 drop-shadow-lg">전투 보상 선택</h2>
                         <p class="text-2xl text-slate-200 drop-shadow-md">모험에 도움이 될 증강을 하나 선택하세요.<br>(게임 종료 시까지 영구 누적 적용)</p>
@@ -1453,36 +1527,40 @@ function render() {
         `;
     }
     else if (state.screen === 'ending') {
+        const completedAchievements = Object.values(state.achievements).filter(v => v === true).length;
+        const totalAchievements = ACHIEVEMENTS_LIST.length;
+        
         const endingBg = './assets_bg/' + REGIONS[4].bg; 
         html = audioBtn + `
-            <div class="w-full h-full flex flex-col items-center justify-center ${transitionClass} bg-cover bg-center relative" style="background-image: url('${endingBg}');">
-                <div class="absolute inset-0 bg-slate-900/70 z-0"></div>
-                <div class="z-10 relative flex flex-col items-center justify-center w-full max-w-5xl mx-auto px-6">
-                    <div class="text-[140px] mb-6 drop-shadow-2xl">🏆</div>
-                    <h2 class="text-7xl font-bold text-yellow-400 mb-6 title-font drop-shadow-lg text-center break-keep">왕국 구출 성공!</h2>
-                    <p class="text-slate-100 mb-12 text-3xl font-bold leading-relaxed drop-shadow-md text-center">무승부의 마왕을 물리치고 왕국에 평화를 가져왔습니다!<br>당신은 진정한 심리전의 마스터입니다.</p>
+            <div class="w-full h-full flex flex-col items-center justify-center bg-black relative p-6">
+                <div class="absolute inset-0 bg-cover bg-center opacity-30 fade-in-slow" style="background-image: url('${endingBg}'); animation-delay: 8s;"></div>
+                <div class="z-10 relative max-w-4xl w-full text-center space-y-10 my-auto pb-10 mt-12">
+                    <h2 class="text-7xl text-yellow-400 font-bold title-font mb-4 fade-in-slow">가위바위보 히어로 키우기</h2>
+                    <p class="text-3xl text-slate-200 leading-loose fade-in-slow" style="animation-delay: 1.5s; opacity: 0;">마지막 승부가 끝났다.</p>
+                    <p class="text-3xl text-slate-200 leading-loose fade-in-slow" style="animation-delay: 3s; opacity: 0;">마왕의 그림자는 사라지고,<br>멈춰 있던 왕국의 시간이 다시 흐르기 시작했다.</p>
+                    <div class="text-2xl text-slate-300 leading-loose fade-in-slow" style="animation-delay: 4.5s; opacity: 0;">
+                        <p>가위는 다시 길을 열고,</p>
+                        <p>바위는 다시 왕국을 지키고,</p>
+                        <p>보는 다시 모두를 감싸 안았다.</p>
+                    </div>
+                    <p class="text-3xl text-slate-200 leading-loose fade-in-slow" style="animation-delay: 6s; opacity: 0;">세 힘의 균형은 되돌아왔다.<br>그리고 사람들은 그날의 히어로를 오래도록 기억했다.</p>
+                    <p class="text-5xl text-yellow-400 font-bold title-font leading-loose fade-in-slow" style="animation-delay: 7.5s; opacity: 0;">당신은 진정한 가위바위보 히어로입니다.</p>
                     
-                    <div class="bg-slate-800/80 backdrop-blur-md rounded-[2rem] p-10 w-full mb-12 text-left border-4 border-slate-600 shadow-2xl flex flex-row items-center justify-between gap-6">
-                        <div class="text-left w-auto">
-                            <h3 class="text-4xl text-yellow-300 font-bold mb-6 drop-shadow">나의 모험 기록</h3>
-                            <div class="flex flex-row gap-6 items-center justify-start mb-6">
-                                <img src="./assets_hero/${state.player.cls.imgPrefix}_idle.png" class="border-4 border-slate-500 rounded-3xl shrink-0 bg-white shadow-xl object-cover" style="width: 160px; height: 160px; image-rendering: pixelated;" alt="Player">
-                                <p class="text-green-300 font-bold text-4xl drop-shadow break-keep">최종 레벨<br>Lv.${state.player.level} ${state.player.cls.name}</p>
+                    <div class="fade-in-slow" style="animation-delay: 9s; opacity: 0;">
+                        <h1 class="text-[100px] text-white font-bold title-font mt-12 mb-8 drop-shadow-lg">THE END</h1>
+                        
+                        <div class="bg-slate-800/80 p-10 rounded-3xl border-4 border-slate-600 shadow-2xl flex flex-row items-center justify-center gap-8 mb-8 text-left max-w-2xl mx-auto backdrop-blur-md">
+                            <img src="./assets_hero/${state.player.cls.imgPrefix}_idle.png" class="border-4 border-slate-500 rounded-3xl shrink-0 bg-white shadow-xl object-cover w-[160px] h-[160px]" style="image-rendering: pixelated;" alt="Player">
+                            <div class="text-2xl font-bold text-slate-200 space-y-4 w-full">
+                                <p class="text-green-300 text-4xl mb-4 title-font">최종 결과</p>
+                                <p>히어로: <span class="text-white">${state.player.cls.name}</span></p>
+                                <p>최종 레벨: <span class="text-white">Lv.${state.player.level}</span></p>
+                                <p>보유 골드: <span class="text-yellow-400">${state.player.gold} G</span></p>
+                                <p>수집 증강: <span class="text-purple-300">${state.player.augments.length} 개</span></p>
+                                <p>달성 업적: <span class="text-pink-400">${completedAchievements} / ${totalAchievements}</span></p>
                             </div>
                         </div>
-                        <div class="text-2xl font-bold text-slate-200 bg-slate-900/60 p-8 rounded-3xl border-2 border-slate-700 space-y-4 text-right shadow-inner w-auto">
-                            <p>✌️ 쌍검 베기: <span class="text-white">${state.player.stats.scissors}회</span></p>
-                            <p>✊ 방패 강타: <span class="text-white">${state.player.stats.rock}회</span></p>
-                            <p>✋ 마법 장막: <span class="text-white">${state.player.stats.paper}회</span></p>
-                        </div>
-                    </div>
-                    
-                    <div class="flex flex-row gap-8 w-full">
-                        <div class="flex flex-row gap-4 w-full flex-[1.5]">
-                            <button onclick="openAchievements()" class="flex-1 bg-pink-600 hover:bg-pink-500 text-white font-bold py-8 px-10 rounded-3xl shadow-2xl border-b-8 border-pink-800 active:border-b-0 active:mt-2 transition-all text-3xl flex items-center justify-center">🏅 업적</button>
-                            <button onclick="openBestiary()" class="flex-1 bg-purple-600 hover:bg-purple-500 text-white font-bold py-8 px-10 rounded-3xl shadow-2xl border-b-8 border-purple-800 active:border-b-0 active:mt-2 transition-all text-3xl flex items-center justify-center">📖 도감</button>
-                        </div>
-                        <button onclick="restartGame()" class="w-full flex-[2] bg-blue-600 hover:bg-blue-500 text-white font-bold py-8 px-10 rounded-3xl shadow-2xl border-b-8 border-blue-800 active:border-b-0 active:mt-2 transition-all text-4xl">새 모험 시작</button>
+                        <button onclick="restartGame()" class="bg-blue-600 hover:bg-blue-500 text-white font-bold py-6 px-16 rounded-3xl shadow-2xl border-b-8 border-blue-800 active:border-b-0 active:mt-2 transition-all text-4xl">타이틀로 돌아가기</button>
                     </div>
                 </div>
             </div>
