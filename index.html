@@ -1,0 +1,1473 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>가위바위보 왕국 RPG</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Gowun+Dodum&family=Jua&display=swap');
+        
+        body {
+            font-family: 'Gowun Dodum', sans-serif;
+            background-color: #1e293b;
+            color: #f8fafc;
+            touch-action: manipulation;
+            margin: 0;
+            padding: 0;
+            overflow: hidden;
+            height: 100dvh; 
+        }
+        h1, h2, h3, .title-font {
+            font-family: 'Jua', sans-serif;
+        }
+        
+        @keyframes shake {
+            0% { transform: translateX(0); }
+            25% { transform: translateX(-5px); }
+            50% { transform: translateX(5px); }
+            75% { transform: translateX(-5px); }
+            100% { transform: translateX(0); }
+        }
+        .anim-shake { animation: shake 0.3s ease-in-out; }
+        
+        /* 어지러운 pop 애니메이션 대신 부드러운 fade-in 추가 */
+        @keyframes fadeIn {
+            from { opacity: 0; }
+            to { opacity: 1; }
+        }
+        .fade-in { animation: fadeIn 0.4s ease-in-out; }
+
+        @keyframes float-up {
+            0% { transform: translateY(0) scale(0.8); opacity: 1; font-weight: bold; }
+            80% { opacity: 1; }
+            100% { transform: translateY(-80px) scale(1.2); opacity: 0; }
+        }
+        .anim-float { 
+            animation: float-up 1s cubic-bezier(0.25, 0.46, 0.45, 0.94) forwards; 
+            position: absolute; 
+            pointer-events: none; 
+            z-index: 50; 
+        }
+
+        @keyframes bounce-slow {
+            0%, 100% { transform: translateY(-5%); }
+            50% { transform: translateY(5%); }
+        }
+        .anim-bubble { animation: bounce-slow 2s infinite ease-in-out; }
+
+        .no-scrollbar::-webkit-scrollbar { display: none; }
+        .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+
+        .tab-active { background-color: #2563eb; color: white; border-color: #1e40af; }
+        .tab-inactive { background-color: rgba(51, 65, 85, 0.8); color: #94a3b8; border-color: #475569; }
+
+        /* 주인공 캐릭터 스프라이트용 CSS */
+        .hero-sprite {
+            background-image: url('./hero.jpg'); /* 만약 이 파일도 png라면 hero.png로 변경해주세요 */
+            background-size: 300% 100%;
+            background-repeat: no-repeat;
+            background-color: #ffffff;
+            image-rendering: pixelated;
+        }
+    </style>
+</head>
+<body class="w-screen h-[100dvh] text-slate-100 flex flex-col">
+
+    <div id="game-container" class="w-full h-full flex flex-col relative bg-slate-900 overflow-hidden">
+        <!-- JS 렌더링 영역 -->
+    </div>
+
+<script>
+// --- 세이브 & 로드 (LocalStorage) ---
+function saveGame() {
+    localStorage.setItem('rpsRPG_save', JSON.stringify(state));
+}
+
+function loadGame() {
+    const saved = localStorage.getItem('rpsRPG_save');
+    if (saved) {
+        state = JSON.parse(saved);
+        state.lastRenderedScreen = ''; // 불러올 때 트랜지션 효과를 위해 초기화
+        AudioEngine.init();
+        if(state.screen === 'battle' || state.screen === 'tacticSelect') {
+            const trackIdx = state.currentRegion >= 4 ? 3 : state.currentRegion - 1; 
+            AudioEngine.setTrack(trackIdx);
+        }
+        render();
+    }
+}
+
+// --- 오디오 매니저 ---
+const AudioEngine = {
+    ctx: null, bgmInterval: null, muted: true, noteIndex: 0, currentTrack: 0,
+    // 4개의 지역 BGM (왕실과 왕좌는 동일한 무거운 트랙 공유)
+    bgmTracks: [
+        [261.6, 329.6, 392.0, 523.3, 392.0, 329.6, 261.6, 196.0], // 1장 (숲속) : 밝은 C메이저
+        [146.8, 164.8, 174.6, 220.0, 174.6, 164.8, 146.8, 110.0], // 2장 (도성) : 무거운 D마이너
+        [329.6, 349.2, 415.3, 493.9, 415.3, 349.2, 329.6, 246.9], // 3장 (연회장) : 신비로운 프리지안
+        [130.8, 146.8, 130.8, 98.0,  130.8, 146.8, 130.8, 98.0]   // 4장, 5장 (왕실, 왕좌) : 낮고 위협적인 반복
+    ],
+    
+    init() {
+        if(!this.ctx) {
+            this.ctx = new (window.AudioContext || window.webkitAudioContext)();
+            this.muted = false;
+            this.startBGM();
+        } else if (this.ctx.state === 'suspended') {
+            this.ctx.resume();
+        }
+    },
+    toggle() {
+        this.muted = !this.muted;
+        if(this.muted) { clearInterval(this.bgmInterval); } 
+        else { this.startBGM(); }
+        render(); // UI 업데이트용
+    },
+    setTrack(trackIndex) {
+        if (this.currentTrack !== trackIndex) {
+            this.currentTrack = Math.max(0, Math.min(trackIndex, this.bgmTracks.length - 1));
+            if (!this.muted) this.startBGM(); // 즉시 트랙 변경
+        }
+    },
+    playTone(freq, type, duration, vol=0.1) {
+        if(!this.ctx || this.muted) return;
+        const osc = this.ctx.createOscillator();
+        const gain = this.ctx.createGain();
+        osc.type = type;
+        osc.frequency.setValueAtTime(freq, this.ctx.currentTime);
+        gain.gain.setValueAtTime(vol, this.ctx.currentTime);
+        gain.gain.exponentialRampToValueAtTime(0.01, this.ctx.currentTime + duration);
+        osc.connect(gain);
+        gain.connect(this.ctx.destination);
+        osc.start();
+        osc.stop(this.ctx.currentTime + duration);
+    },
+    startBGM() {
+        if(this.bgmInterval) clearInterval(this.bgmInterval);
+        this.noteIndex = 0; // 시작 시 노트 인덱스 초기화
+        this.bgmInterval = setInterval(() => {
+            if(!this.muted && this.ctx) {
+                const notes = this.bgmTracks[this.currentTrack];
+                this.playTone(notes[this.noteIndex], 'triangle', 0.2, 0.03);
+                this.noteIndex = (this.noteIndex + 1) % notes.length;
+            }
+        }, 250);
+    },
+    sfx: {
+        hit() { AudioEngine.playTone(150, 'sawtooth', 0.2, 0.15); },
+        heal() { AudioEngine.playTone(600, 'sine', 0.2, 0.1); setTimeout(()=>AudioEngine.playTone(800, 'sine', 0.3, 0.1), 100); },
+        coin() { AudioEngine.playTone(1200, 'square', 0.1, 0.05); setTimeout(()=>AudioEngine.playTone(1600, 'square', 0.2, 0.05), 100); },
+        win() { [400, 500, 600, 800].forEach((f,i)=>setTimeout(()=>AudioEngine.playTone(f, 'square', 0.2, 0.1), i*150)); },
+        lose() { [300, 250, 200, 150].forEach((f,i)=>setTimeout(()=>AudioEngine.playTone(f, 'sawtooth', 0.3, 0.15), i*200)); },
+        select() { AudioEngine.playTone(400, 'sine', 0.1, 0.05); }
+    }
+};
+
+// --- 데이터 정의 ---
+const MOVES = {
+    'scissors': { name: '✌️ 쌍검 베기', action: '베어냈다' },
+    'rock': { name: '✊ 방패 강타', action: '내리쳤다' },
+    'paper': { name: '✋ 마법 장막', action: '휘감았다' }
+};
+const MOVE_ICONS = { 'scissors': '✌️', 'rock': '✊', 'paper': '✋' };
+
+const CLASSES = {
+    scissors: { id: 'scissors', name: '쌍검 전사 ✌️', icon: '✌️', imgPrefix: 'sword', desc: '빠른 공격형. 3연속 승리 시 [폭풍 베기] 발동', skillName: '연속 베기 (기력 3)', baseHp: 60, baseAtk: 6 },
+    rock: { id: 'rock', name: '중갑 기사 ✊', icon: '✊', imgPrefix: 'shield', desc: '방어형. 체력이 30% 이하일 때 받는 피해 절반 감소', skillName: '철벽 방어 (기력 3)', baseHp: 80, baseAtk: 4 },
+    paper: { id: 'paper', name: '장막 마법사 ✋', icon: '✋', imgPrefix: 'magic', desc: '전략형. 마법 장막으로 승리 시 다음 턴 적 봉인', skillName: '치유의 종이학 (기력 3)', baseHp: 70, baseAtk: 5 }
+};
+
+const TACTICS = [
+    { id: 'observe', icon: '👁️', name: '신중한 관찰', desc: '첫 턴 적의 행동 힌트가 완벽해집니다.' },
+    { id: 'ambush', icon: '🔪', name: '기습 공격', desc: '첫 승리 피해 +3 / 첫 패배 피해 +2' },
+    { id: 'defend', icon: '🛡️', name: '방어 태세', desc: '첫 패배 시 받는 피해가 3 감소합니다.' },
+    { id: 'reckless', icon: '🔥', name: '무모한 돌진', desc: '첫 승리 피해 +5 / 전투 시작 시 기력 0' },
+    { id: 'vampire', icon: '🧛', name: '흡혈 태세', desc: '첫 승리 시 체력을 5 회복합니다.' },
+    { id: 'meditate', icon: '🧘', name: '명상', desc: '시작 기력 +2 / 첫 승리 피해 -2' },
+    { id: 'thief', icon: '💰', name: '소매치기', desc: '첫 승리 시 10 골드를 즉시 획득합니다.' },
+    { id: 'reflect', icon: '🪞', name: '방패 치기', desc: '첫 패배 시 적에게 4의 피해를 반사합니다.' },
+    { id: 'sacrifice', icon: '🩸', name: '혈투', desc: '시작 체력 -5 / 첫 승리 피해 +6' },
+    { id: 'lucky', icon: '🍀', name: '행운의 동전', desc: '전투 시작 시 50% 확률로 기력이 가득 찹니다.' },
+    { id: 'draw_heal', icon: '🩹', name: '숨 고르기', desc: '첫 무승부 시 체력을 5 회복합니다.' },
+    { id: 'draw_energy', icon: '⚡', name: '기 모으기', desc: '첫 무승부 시 기력을 2 추가 회복합니다.' },
+    { id: 'berserk', icon: '😡', name: '광전사', desc: '첫 승리 피해 2배 / 첫 패배 피해 2배' },
+    { id: 'iron', icon: '🧱', name: '단단한 피부', desc: '시작 체력 -3 / 첫 패배 피해 무효화' },
+    { id: 'scout', icon: '🔭', name: '정찰', desc: '첫 턴 적의 패 확인 / 첫 패배 피해 +3' }
+];
+
+const AUGMENTS = [
+    { id: 'aug_sc_dmg', name: '예리한 칼날 ✂️', desc: '쌍검 베기로 승리 시 추가 피해 +5' },
+    { id: 'aug_rk_def', name: '단단한 방패 🪨', desc: '방패 강타로 패배 시 받는 피해 4 추가 감소' },
+    { id: 'aug_pp_heal', name: '재생의 마법 🧻', desc: '마법 장막으로 무승부 시 체력 7 회복' },
+    { id: 'aug_vampire', name: '흡혈귀의 피 🩸', desc: '모든 승리 시 체력 3 회복' },
+    { id: 'aug_rich', name: '현상금 사냥꾼 💰', desc: '전투 승리 시 골드 보상 +15' },
+    { id: 'aug_energy', name: '마나의 샘 💧', desc: '무승부 시 기력 회복량 +1' },
+    { id: 'aug_thorns', name: '가시 갑옷 🌵', desc: '적에게 맞을 때 3의 반사 피해' },
+    { id: 'aug_berserk', name: '광전사의 분노 😡', desc: '체력이 30% 이하일 때 공격력 1.5배' },
+    { id: 'aug_giant', name: '거인의 힘 🧟', desc: '최대 체력 +20, 즉시 체력 20 회복' },
+    { id: 'aug_focus', name: '약점 포착 🎯', desc: '3연속 승리 시 기력 MAX 충전' },
+    { id: 'aug_lucky', name: '행운의 여신 🍀', desc: '매 턴마다 20% 확률로 기력 1 회복' },
+    { id: 'aug_combo', name: '콤보 마스터 🥊', desc: '2연속 승리 시 기력 +1' },
+    { id: 'aug_heavy', name: '무거운 갑옷 🐢', desc: '최대 체력 +40, 대신 기력이 0으로 시작' },
+    { id: 'aug_stone', name: '바위의 결의 🗿', desc: '방패 강타로 무승부 시 체력 5 회복' },
+    { id: 'aug_magic', name: '장막의 춤 💃', desc: '마법 장막으로 승리 시 기력 2 회복' },
+    { id: 'aug_greed', name: '탐욕의 항아리 🏺', desc: '전투 시작 시 랜덤으로 5~15 골드 획득' },
+    { id: 'aug_survival', name: '생존 본능 🍖', desc: '전투 시작 시 체력이 50% 이하면 체력 20 회복' },
+    { id: 'aug_mirror', name: '마법 거울 🪞', desc: '적에게 10 이상의 피해를 받을 때 5 반사' },
+    { id: 'aug_first', name: '선봉장 ⚔️', desc: '매 전투의 첫 번째 턴 공격력 +5' },
+    { id: 'aug_last', name: '장기전의 달인 ⏳', desc: '5턴 이상 지속된 전투부터 매 턴 체력 3 회복' }
+];
+
+const ACHIEVEMENTS_LIST = [
+    { id: 'winStreak3', name: '🔥 3연승의 파도', desc: '전투 중 3연승을 달성했다!' },
+    { id: 'drawStreak5', name: '🤝 무승부의 달인', desc: '전투 중 5연속 무승부를 기록했다!' },
+    { id: 'survive1Hp', name: '❤️ 기적의 생존자', desc: '체력 1을 남기고 승리했다!' },
+    { id: 'perfectWin', name: '🛡️ 무결점', desc: '단 한 번도 피해를 받지 않고 전투에서 승리했다!' },
+    { id: 'overkill', name: '💥 오버킬', desc: '적에게 한 번에 50 이상의 피해를 입혔다!' },
+    { id: 'rich', name: '💰 갑부', desc: '소지 골드 300G 이상을 달성했다!' },
+    { id: 'collector', name: '🔮 유물 수집가', desc: '증강을 7개 이상 모았다!' },
+    { id: 'revived', name: '✝️ 불사조', desc: '부활의 십자가를 사용해 위기를 모면했다!' },
+    { id: 'maxUpgrade', name: '⚒️ 전설의 장인', desc: '상점에서 장비 하나를 에픽 등급까지 강화했다!' }
+];
+
+// 게임 밸런스 조정: 총 2,550 골드로 에픽 풀 업그레이드 가능하도록 조정
+const UPGRADES = {
+    weapon: [
+        { level: 1, name: '일반: 강철 검 🗡️', desc: '공격력 +4', price: 60, atk: 4 },
+        { level: 2, name: '매직: 룬 블레이드 ⚔️', desc: '공격력 +12', price: 100, atk: 12 },
+        { level: 3, name: '레어: 전설의 성검 🌟', desc: '공격력 +30', price: 250, atk: 30 },
+        { level: 4, name: '에픽: 무한의 대검 🌌', desc: '공격력 +70', price: 500, atk: 70 }
+    ],
+    armor: [
+        { level: 1, name: '일반: 가죽 갑옷 🛡️', desc: '최대 체력 +30', price: 60, hp: 30 },
+        { level: 2, name: '매직: 미스릴 흉갑 ✨', desc: '최대 체력 +80', price: 100, hp: 80 },
+        { level: 3, name: '레어: 드래곤 하트 🐉', desc: '최대 체력 +200', price: 250, hp: 200 },
+        { level: 4, name: '에픽: 절대자의 방패 🌌', desc: '최대 체력 +500', price: 500, hp: 500 }
+    ],
+    accessory: [
+        { level: 1, name: '일반: 활력의 반지 📿', desc: '최대 기력 +1', price: 80, energy: 1 },
+        { level: 2, name: '매직: 지혜의 눈 🔮', desc: '최대 기력 +2', price: 150, energy: 2 },
+        { level: 3, name: '레어: 초월의 룬 🌟', desc: '최대 기력 +4', price: 300, energy: 4 },
+        { level: 4, name: '에픽: 영원의 보석 🌌', desc: '최대 기력 +7', price: 600, energy: 7 }
+    ]
+};
+
+const SHOP_ITEMS = {
+    consumable: [
+        { id: 'item_crystal', name: '예언의 수정구 🔮', desc: '전투 첫 턴 적의 패 확인', price: 30, action: (p) => p.inventory.crystal += 1 },
+        { id: 'item_cloak', name: '속임수 망토 🥷', desc: '패배 1회 무승부로 변경', price: 45, action: (p) => p.inventory.cloak += 1 },
+        { id: 'item_bomb', name: '고블린 폭탄 💣', desc: '전투 시작 시 적에게 25 피해', price: 40, action: (p) => p.inventory.bomb += 1 },
+        { id: 'item_flash', name: '섬광탄 💥', desc: '전투 시작 시 적을 1턴 기절', price: 50, action: (p) => p.inventory.flash += 1 },
+        { id: 'item_potion_l', name: '엘릭서 🧪', desc: '체력을 100% 회복 (즉시사용)', price: 70, action: (p) => p.hp = p.maxHp },
+        { id: 'rev_1', name: '부활의 십자가 ✝️', desc: '사망 시 1회 부활 (체력50%)', price: 100, action: (p) => p.revives += 1 }
+    ],
+    buff: [
+        { id: 'buf_1', name: '호랑이 기운 🐯', desc: '다음 1번의 전투 내내 공격력 1.5배', price: 50, action: (p) => p.nextBuff = 'atk_boost' },
+        { id: 'buf_3', name: '가시 오라 🌵', desc: '다음 1번의 전투 내내 반사 피해 +5', price: 45, action: (p) => p.nextBuff = 'thorns_aura' },
+        { id: 'buf_4', name: '마력 폭주 ⚡', desc: '다음 1번의 전투 내내 스킬 기력 소모 0', price: 80, action: (p) => p.nextBuff = 'mana_surge' }
+    ]
+};
+
+const REGIONS = [
+    { id: 1, name: '🌳 제1장: 숲속', desc: '울창하고 기운찬 숲속. 여정의 첫걸음을 내딛습니다.', bg: 'bg1.png' },
+    { id: 2, name: '🏰 제2장: 왕국 도성', desc: '웅장한 도성의 입구. 무장한 병력들이 길을 막아섭니다.', bg: 'bg2.png' },
+    { id: 3, name: '🍷 제3장: 연회장', desc: '화려한 연회장. 아름다움 속에 치명적인 함정이 도사리고 있습니다.', bg: 'bg3.png' },
+    { id: 4, name: '👑 제4장: 왕실 내부', desc: '왕실의 깊숙한 곳. 마왕을 수호하는 강력한 정예병들이 기다립니다.', bg: 'bg4.png' },
+    { id: 5, name: '👿 제5장: 왕좌', desc: '마침내 도달한 왕좌. 모든 것의 원흉, 마왕과의 마지막 결전입니다.', bg: 'bg5.png' }
+];
+
+const MONSTERS = [
+    // 1장
+    { id: 'm1', name: '바위 골렘 🗿', hp: 30, atk: 4, exp: 20, goldReward: 20, icon: '🗿', pattern: 'boss_golem', fav: '✊ 방패 강타', dialogue: '"부순다."', hints: { rock: '육중한 기운을 모아 단단하게 뭉칩니다.', paper: '양팔을 좌우로 넓게 벌리며 빈틈을 보입니다.', scissors: '팔의 모서리를 예리한 각도로 세웁니다.' } },
+    { id: 'm2', name: '조약돌 두더지 🪨', hp: 40, atk: 5, exp: 25, goldReward: 25, icon: '🐹', pattern: 'heavy_rock', fav: '✊ 방패 강타', dialogue: '"단단한 것만 믿는다!"', hints: { rock: '몸의 중심을 낮추고 둥글게 힘을 응축시킵니다.', paper: '긴장을 풀고 주변의 공기를 넓게 가릅니다.', scissors: '어둠 속에서 서늘하고 뾰족한 기운이 스칩니다.' } },
+    { id: 'm3', name: '가위 벌레 🐛', hp: 45, atk: 6, exp: 30, goldReward: 25, icon: '🐛', pattern: 'heavy_scissors', fav: '✌️ 쌍검 베기', dialogue: '"싹둑싹둑!"', hints: { rock: '스스로를 빈틈없는 둥근 형태로 말아냅니다.', paper: '더듬이를 유연하게 사방으로 뻗어냅니다.', scissors: '날카로운 두 갈래의 끝부분이 교차하며 마찰음을 냅니다.' } },
+    { id: 'm5', name: '거대 풀잎 슬라임 🌱 (보스)', hp: 100, atk: 10, exp: 60, goldReward: 80, icon: '🌱', pattern: 'random', fav: '무작위', dialogue: '"거대한 말캉..."', hints: { rock: '알 수 없는 기운이 요동칩니다.', paper: '알 수 없는 기운이 요동칩니다.', scissors: '알 수 없는 기운이 요동칩니다.' } },
+    
+    // 2장
+    { id: 'm6', name: '패턴 늑대 🐺', hp: 70, atk: 9, exp: 40, goldReward: 35, icon: '🐺', pattern: 'random', fav: '무작위', dialogue: '"크르릉..."', hints: { rock: '근육을 팽팽하게 수축시키며 무게중심을 낮춥니다.', paper: '가벼운 스텝을 밟으며 활동 반경을 크게 넓힙니다.', scissors: '목줄기를 노리는 듯한 뾰족한 살기가 느껴집니다.' } },
+    { id: 'm7', name: '강철 두더지 🛡️', hp: 85, atk: 11, exp: 50, goldReward: 40, icon: '🦡', pattern: 'heavy_rock', fav: '✊ 방패 강타', dialogue: '"절대 뚫리지 않아!"', hints: { rock: '무엇도 뚫지 못할 견고한 장벽을 형성합니다.', paper: '경계 태세를 허물고 양팔을 길게 늘어뜨립니다.', scissors: '번뜩이는 쇳소리와 함께 예리한 궤적을 그립니다.' } },
+    { id: 'm9', name: '쌍검 암살자 ⚔️', hp: 80, atk: 15, exp: 60, goldReward: 50, icon: '🥷', pattern: 'heavy_scissors', fav: '✌️ 쌍검 베기', dialogue: '"눈보다 빠르지."', hints: { rock: '몸을 한껏 움츠려 모든 충격에 대비하는 자세를 취합니다.', paper: '발소리를 죽인 채 사방으로 그림자를 넓힙니다.', scissors: '차갑고 뾰족한 살기가 정면을 향해 두 갈래로 뻗어옵니다.' } },
+    { id: 'm10', name: '타락한 검사 💀 (보스)', hp: 150, atk: 16, exp: 100, goldReward: 120, icon: '🧛', pattern: 'boss_swordsman', fav: '✌️ 쌍검 베기', dialogue: '"어설픈 마법은 찢길 뿐이다!"', hints: { rock: '움직임을 최소화하고 묵직한 기운을 갈무리합니다.', paper: '어두운 기운을 사방으로 흩날리며 빈틈을 유도합니다.', scissors: '공기를 찢는 듯한 서늘한 궤적이 번뜩입니다.' } },
+    
+    // 3장
+    { id: 'm4', name: '종이 유령 👻', hp: 90, atk: 12, exp: 55, goldReward: 45, icon: '👻', pattern: 'heavy_paper', fav: '✋ 마법 장막', dialogue: '"감싸주마..."', hints: { rock: '흐릿한 형체가 한 점으로 단단하게 응축됩니다.', paper: '자신의 영역을 무한히 넓히며 주변을 집어삼킬 듯 굽어봅니다.', scissors: '흐늘거리던 끝부분이 순간적으로 창끝처럼 벼려집니다.' } },
+    { id: 'm8', name: '마법의 책 📘', hp: 110, atk: 14, exp: 65, goldReward: 55, icon: '📘', pattern: 'heavy_paper', fav: '✋ 마법 장막', dialogue: '"지식이 너를 삼킬 것이다."', hints: { rock: '모든 지식을 굳게 잠그고 어떠한 간섭도 거부합니다.', paper: '수많은 갈래로 쪼개진 지식들이 유연하게 허공을 춤춥니다.', scissors: '빳빳하게 굳어진 모서리가 예리하게 날을 세웁니다.' } },
+    { id: 'm11', name: '불타는 슬라임 🔥', hp: 130, atk: 15, exp: 70, goldReward: 65, icon: '🔥', pattern: 'random', fav: '무작위', dialogue: '"다 태워버릴거야!"', hints: { rock: '뜨거운 기운이 폭발하기 직전처럼 둥글게 뭉쳐집니다.', paper: '맹렬한 화염이 사방으로 통제할 수 없이 번져나갑니다.', scissors: '가장 뜨거운 끝부분이 바늘처럼 뾰족하게 쏘아집니다.' } },
+    { id: 'm14', name: '거울 정령 🪞 (보스)', hp: 180, atk: 18, exp: 120, goldReward: 130, icon: '🪞', pattern: 'counter', fav: '카운터', dialogue: '"네 습관은 거울에 비쳤다."', hints: { rock: '표면이 불투명해지며 모든 충격을 흡수할 태세를 갖춥니다.', paper: '경계가 허물어지며 끝없이 넓은 공간을 투영합니다.', scissors: '날카로운 조각들이 허공에 떠올라 예리한 빛을 반사합니다.' } },
+    
+    // 4장
+    { id: 'm12', name: '얼음 수정 ❄️', hp: 150, atk: 17, exp: 80, goldReward: 70, icon: '❄️', pattern: 'heavy_rock', fav: '✊ 방패 강타', dialogue: '"절대 영도를 맛보아라."', hints: { rock: '극한의 냉기가 뭉쳐 절대 부서지지 않을 결정체가 됩니다.', paper: '파동이 사방으로 흩날리며 넓은 범위를 얼어붙게 합니다.', scissors: '투명하고 예리한 냉기가 당신의 심장을 겨눕니다.' } },
+    { id: 'm13', name: '맹독 거미 🕷️', hp: 160, atk: 20, exp: 90, goldReward: 75, icon: '🕷️', pattern: 'heavy_scissors', fav: '✌️ 쌍검 베기', dialogue: '"쉭쉭..."', hints: { rock: '몸을 한껏 웅크려 치명적인 타격으로부터 스스로를 보호합니다.', paper: '사방에 끈적한 기운을 넓게 흩뿌려 퇴로를 차단합니다.', scissors: '치명적인 독을 품은 뾰족한 두 개의 송곳니가 번뜩입니다.' } },
+    { id: 'm16', name: '그림자 기사 👤', hp: 180, atk: 22, exp: 110, goldReward: 80, icon: '👤', pattern: 'rock_scissors', fav: '방패/쌍검', dialogue: '"이곳을 지나갈 수 없다."', hints: { rock: '어둠을 둥글게 뭉쳐 뚫을 수 없는 묵직한 벽을 세웁니다.', paper: '그림자가 사방으로 길게 늘어지며 공간을 지배합니다.', scissors: '서늘하게 벼려진 칠흑의 기운이 직선으로 쏘아집니다.' } },
+    { id: 'm15', name: '왕실 근위대장 🛡️ (보스)', hp: 250, atk: 24, exp: 150, goldReward: 160, icon: '💂', pattern: 'heavy_paper', fav: '✋ 마법 장막', dialogue: '"왕실의 권위는 절대 무너지지 않는다."', hints: { rock: '양발을 굳게 딛고 산처럼 묵직한 태세를 취합니다.', paper: '화려한 기운을 펄럭이며 주변의 시야를 넓게 덮습니다.', scissors: '치명적인 일격을 위해 예리한 궤적을 그어냅니다.' } },
+    
+    // 5장
+    { id: 'm17', name: '환영 마법사 🔮', hp: 200, atk: 25, exp: 130, goldReward: 90, icon: '🔮', pattern: 'paper_scissors', fav: '장막/쌍검', dialogue: '"무엇이 진짜인지 보이나?"', hints: { rock: '마력이 하나의 둥근 구체로 빽빽하게 밀집됩니다.', paper: '복잡한 흐름이 바닥을 타고 거대하게 퍼져나갑니다.', scissors: '마력이 뾰족한 형태로 변환되어 주변을 맴돕니다.' } },
+    { id: 'm18', name: '황금 골렘 👑', hp: 280, atk: 26, exp: 140, goldReward: 120, icon: '🪙', pattern: 'heavy_rock', fav: '✊ 방패 강타', dialogue: '"나의 황금은 부서지지 않는다."', hints: { rock: '눈부신 기운이 한 덩어리로 굳어지며 절대적인 무게감을 뽐냅니다.', paper: '찬란한 가루들이 대기 중으로 넓게 흩뿌려집니다.', scissors: '금빛의 끝자락이 날카로운 형태로 뾰족해집니다.' } },
+    { id: 'm19', name: '마왕의 호위무사 👹', hp: 250, atk: 30, exp: 170, goldReward: 130, icon: '👹', pattern: 'heavy_scissors', fav: '✌️ 쌍검 베기', dialogue: '"마왕님을 위해 벤다!"', hints: { rock: '전신의 근육을 수축시키며 파괴적인 무게감을 버텨낼 준비를 합니다.', paper: '시커먼 기운을 사방으로 폭발시키며 모든 것을 뻗어냅니다.', scissors: '당신의 숨통을 끊어버릴 듯한 섬뜩하고 날카로운 살기가 뿜어집니다.' } },
+    { id: 'm20', name: '무승부의 마왕 👿 (최종보스)', hp: 550, atk: 35, exp: 500, goldReward: 1000, icon: '👿', pattern: 'boss_demon', fav: '당신의 심리', dialogue: '"결국 운명은 돌고 돌아 원점이 될 것이다..."', hints: { rock: '태산조차 짓누를 듯한 숨 막히는 압박감이 한 곳으로 응축됩니다.', paper: '모든 빛을 흡수하는 끝없는 어둠이 유연하게 팽창합니다.', scissors: '영혼마저 찢어버릴 듯한 극한의 서늘한 마기가 벼려집니다.' } }
+];
+
+let state = {
+    screen: 'title', difficulty: 'normal', isAnimating: false,
+    player: {
+        cls: null, hp: 0, maxHp: 0, energy: 0, maxEnergy: 5, atk: 0, level: 1, exp: 0, gold: 0, revives: 0,
+        stats: { scissors: 0, rock: 0, paper: 0 }, inventory: { crystal: 0, cloak: 0, candy: 0, bomb: 0, flash: 0 },
+        buff: null, nextBuff: null, activeBuff: null,
+        augments: [], seenAugments: [], consecutiveWins: 0, consecutiveDraws: 0, history: [], tactic: null, tacticUsed: false, firstDmgTaken: false,
+        equipLevel: { weapon: 0, armor: 0, accessory: 0 }, animState: 'idle'
+    },
+    currentRegion: 1, stage: 0, monster: null, monsterHp: 0, monsterNextMove: null, monsterStatus: null,
+    log: [], floatingTexts: [], shakeTarget: null, shopTab: 'equip', offeredAugments: [], offeredTacticsOptions: [], turnCount: 0, bestiary: {},
+    achievements: { winStreak3: false, survive1Hp: false, drawStreak5: false, maxUpgrade: false, perfectWin: false, overkill: false, rich: false, collector: false, revived: false },
+    rouletteUsed: false, crystalHintActive: false,
+    lastRenderedScreen: ''
+};
+
+const $ = (id) => document.getElementById(id);
+
+function showFloatingText(target, text, colorClass) {
+    const id = Date.now() + Math.random();
+    state.floatingTexts.push({ id, target, text, colorClass });
+    // 여기서 직접 렌더를 호출하지 않고, playTurn의 마지막 혹은 필요한 순간에만 렌더되도록 처리하여 데미지 중복 애니메이션 방지
+    setTimeout(() => {
+        const lenBefore = state.floatingTexts.length;
+        state.floatingTexts = state.floatingTexts.filter(f => f.id !== id);
+        // 전투 중 클릭 시 애니메이션 중복 발생을 막기 위해, isAnimating이 아닐 때만 렌더링
+        if (lenBefore !== state.floatingTexts.length && !state.isAnimating) {
+            render();
+        }
+    }, 1200);
+}
+
+function addLog(msg, type='normal') {
+    const colors = { 'normal': 'text-slate-300', 'good': 'text-green-400 font-bold', 'bad': 'text-red-400 font-bold', 'info': 'text-yellow-300', 'aug': 'text-purple-400 font-bold' };
+    state.log.unshift(`<span class="${colors[type]}">${msg}</span>`);
+    if(state.log.length > 30) state.log.pop();
+}
+
+function hasAug(id) { return state.player.augments.some(a => a.id === id); }
+
+function unlockAchievement(id) {
+    if (!state.achievements[id]) {
+        state.achievements[id] = true;
+        const ach = ACHIEVEMENTS_LIST.find(a => a.id === id);
+        addLog(`🏆 업적 달성: ${ach.name}`, 'good');
+        showFloatingText('player', '업적 달성!', 'text-yellow-400 drop-shadow-md');
+    }
+}
+
+function determineMonsterMove() {
+    const mon = state.monster;
+    let move = ['scissors', 'rock', 'paper'][Math.floor(Math.random() * 3)];
+    let disabledMove = null;
+    
+    if (state.monsterStatus && state.monsterStatus.type === 'sealed') {
+        disabledMove = state.monsterStatus.move;
+        while (move === disabledMove) move = ['scissors', 'rock', 'paper'][Math.floor(Math.random() * 3)];
+    }
+
+    if (mon.pattern === 'boss_golem' && state.turnCount % 3 === 2) move = Math.random() < 0.9 ? 'rock' : move;
+    else if (mon.pattern === 'boss_swordsman') move = Math.random() < 0.7 ? 'scissors' : move;
+    else if (mon.pattern === 'boss_demon') {
+        const hist = state.player.history;
+        if (hist.length >= 2 && hist[hist.length-1] === hist[hist.length-2] && Math.random() < 0.8) {
+            const last = hist[hist.length-1];
+            move = last === 'rock' ? 'paper' : (last === 'paper' ? 'scissors' : 'rock');
+        } else if (Math.random() < 0.4) {
+            let fav = 'rock';
+            if(state.player.stats.scissors > state.player.stats.rock) fav = 'scissors';
+            if(state.player.stats.paper > Math.max(state.player.stats.rock, state.player.stats.scissors)) fav = 'paper';
+            move = fav === 'rock' ? 'paper' : (fav === 'paper' ? 'scissors' : 'rock');
+        }
+    }
+    else if (mon.pattern === 'heavy_rock' && Math.random() < 0.6) move = 'rock';
+    else if (mon.pattern === 'heavy_paper' && Math.random() < 0.6) move = 'paper';
+    else if (mon.pattern === 'heavy_scissors' && Math.random() < 0.6) move = 'scissors';
+    else if (mon.pattern === 'counter' && Math.random() < 0.5) {
+        let fav = 'rock';
+        if(state.player.stats.scissors > state.player.stats.rock) fav = 'scissors';
+        if(state.player.stats.paper > Math.max(state.player.stats.rock, state.player.stats.scissors)) fav = 'paper';
+        move = fav === 'rock' ? 'paper' : (fav === 'paper' ? 'scissors' : 'rock');
+    }
+    
+    if (disabledMove && move === disabledMove) {
+        const remaining = ['scissors', 'rock', 'paper'].filter(m => m !== disabledMove);
+        move = remaining[Math.floor(Math.random() * remaining.length)];
+    }
+    state.monsterNextMove = move;
+}
+
+function startGame() {
+    AudioEngine.init();
+    AudioEngine.sfx.select();
+    state.screen = 'difficultySelect';
+    render();
+}
+
+function selectDifficulty(diff) {
+    AudioEngine.sfx.select();
+    state.difficulty = diff;
+    state.screen = 'classSelect';
+    render();
+}
+
+function selectClass(classId) {
+    AudioEngine.sfx.select();
+    const cls = CLASSES[classId];
+    state.player = {
+        cls: cls, hp: cls.baseHp, maxHp: cls.baseHp, energy: 0, maxEnergy: 5, atk: cls.baseAtk, level: 1, exp: 0, gold: 50, revives: 0,
+        stats: { scissors: 0, rock: 0, paper: 0 }, inventory: { crystal: 0, cloak: 0, candy: 0, bomb: 0, flash: 0 },
+        buff: null, nextBuff: null, activeBuff: null, augments: [], seenAugments: [], consecutiveWins: 0, consecutiveDraws: 0, history: [], tactic: null, tacticUsed: false, firstDmgTaken: false,
+        equipLevel: { weapon: 0, armor: 0, accessory: 0 }, animState: 'idle'
+    };
+    
+    if(state.difficulty === 'easy') {
+        state.player.maxHp += 20;
+        state.player.hp += 20;
+        state.player.gold += 50; 
+    }
+    
+    state.stage = 0; state.log = []; state.bestiary = {}; state.floatingTexts = []; state.rouletteUsed = false; state.isAnimating = false;
+    addLog(`${cls.name}로 모험을 시작합니다!`, 'info');
+    checkRegionStart();
+}
+
+function checkRegionStart() {
+    if (state.stage === 0) { state.screen = 'regionIntro'; state.currentRegion = 1; }
+    else if (state.stage === 4) { state.screen = 'regionIntro'; state.currentRegion = 2; }
+    else if (state.stage === 8) { state.screen = 'regionIntro'; state.currentRegion = 3; }
+    else if (state.stage === 12) { state.screen = 'regionIntro'; state.currentRegion = 4; }
+    else if (state.stage === 16) { state.screen = 'regionIntro'; state.currentRegion = 5; }
+    else { startTacticSelect(); return; }
+    
+    const trackIdx = state.currentRegion >= 4 ? 3 : state.currentRegion - 1; 
+    AudioEngine.setTrack(trackIdx);
+    render();
+}
+
+function startTacticSelect() {
+    AudioEngine.sfx.select();
+    state.offeredTacticsOptions = TACTICS.sort(() => 0.5 - Math.random()).slice(0, 3);
+    state.monster = MONSTERS[state.stage];
+    state.bestiary[state.monster.id] = true;
+    state.screen = 'tacticSelect';
+    render();
+}
+
+function chooseTactic(tacticId) {
+    if (state.isAnimating) return;
+    AudioEngine.sfx.select();
+    state.player.tactic = tacticId;
+    state.player.tacticUsed = false;
+    startBattle();
+}
+
+function startBattle() {
+    state.monsterHp = state.monster.hp;
+    state.screen = 'battle';
+    state.player.buff = null;
+    state.turnCount = 0;
+    state.player.consecutiveWins = 0;
+    state.player.consecutiveDraws = 0;
+    state.monsterStatus = null;
+    state.player.firstDmgTaken = false;
+    state.crystalHintActive = false;
+    state.player.animState = 'idle';
+    state.isAnimating = false;
+    state.floatingTexts = [];
+    
+    state.player.activeBuff = state.player.nextBuff;
+    state.player.nextBuff = null;
+    
+    addLog(`STAGE ${state.stage + 1}: ${state.monster.name} 등장!`, 'bad');
+    addLog(`"${state.monster.dialogue}"`, 'normal');
+    
+    if (state.player.inventory.candy > 0) {
+        state.player.energy = Math.min(state.player.maxEnergy, state.player.energy + 2);
+        state.player.inventory.candy--; addLog(`🍬 집중의 사탕: 기력 +2`, 'info');
+    }
+    if (state.player.inventory.bomb > 0) {
+        state.monsterHp -= 25;
+        showFloatingText('monster', '-25', 'text-red-500 drop-shadow-md');
+        state.player.inventory.bomb--; addLog(`💣 고블린 폭탄: 적에게 25 피해!`, 'good');
+    }
+    if (state.player.inventory.flash > 0) {
+        state.monsterStatus = { type: 'stunned', duration: 1 };
+        state.player.inventory.flash--; addLog(`💥 섬광탄: 적이 1턴 기절합니다!`, 'good');
+    }
+    if (state.player.inventory.crystal > 0) {
+        state.crystalHintActive = true;
+    }
+
+    if (state.player.activeBuff === 'atk_boost') addLog(`🐯 [호랑이 기운] 이번 전투 공격력 1.5배!`, 'info');
+    if (state.player.activeBuff === 'thorns_aura') addLog(`🌵 [가시 오라] 반사 피해 +5 활성화!`, 'info');
+    if (state.player.activeBuff === 'mana_surge') addLog(`⚡ [마력 폭주] 스킬 기력 소모 0!`, 'info');
+
+    if (hasAug('aug_heavy')) { state.player.energy = 0; addLog(`🐢 무거운 갑옷: 시작 기력이 0이 됩니다.`, 'info'); }
+    if (hasAug('aug_greed')) { 
+        let g = Math.floor(Math.random() * 11) + 5; 
+        state.player.gold += g; addLog(`🏺 탐욕의 항아리: ${g} 골드 획득!`, 'aug'); 
+    }
+    if (hasAug('aug_survival') && state.player.hp <= state.player.maxHp * 0.5) {
+        state.player.hp = Math.min(state.player.maxHp, state.player.hp + 20); 
+        showFloatingText('player', '+20', 'text-green-400 drop-shadow-md');
+        addLog(`🍖 생존 본능: 체력 20 회복!`, 'aug');
+    }
+    
+    if (state.player.tactic === 'reckless') { state.player.energy = 0; addLog("🔥 무모한 돌진: 기력이 0이 됩니다.", 'info'); }
+    if (state.player.tactic === 'meditate') { state.player.energy = Math.min(state.player.maxEnergy, state.player.energy + 2); addLog("🧘 명상: 시작 기력 +2", 'info'); }
+    if (state.player.tactic === 'sacrifice') { 
+        state.player.hp = Math.max(1, state.player.hp - 5); 
+        showFloatingText('player', '-5', 'text-red-500 drop-shadow-md');
+        addLog("🩸 혈투: 시작 체력 -5", 'bad'); 
+    }
+    if (state.player.tactic === 'lucky') { 
+        if(Math.random() < 0.5) { state.player.energy = state.player.maxEnergy; addLog("🍀 행운의 동전: 기력 MAX!", 'good'); } 
+        else { addLog("🍀 행운의 동전: 꽝!", 'info'); } 
+        state.player.tacticUsed = true; 
+    }
+    if (state.player.tactic === 'iron') { 
+        state.player.hp = Math.max(1, state.player.hp - 3); 
+        showFloatingText('player', '-3', 'text-red-500 drop-shadow-md');
+        addLog("🧱 단단한 피부: 시작 체력 -3", 'bad'); 
+    }
+    if (state.player.tactic === 'observe') { state.player.tacticUsed = true; }
+    
+    determineMonsterMove();
+    render();
+}
+
+function openShop() { AudioEngine.sfx.select(); state.screen = 'shop'; render(); }
+function openBestiary() { AudioEngine.sfx.select(); state.screen = 'bestiary'; render(); }
+function openAchievements() { AudioEngine.sfx.select(); state.screen = 'achievements'; render(); }
+function closeOverlay() { AudioEngine.sfx.select(); state.screen = state.stage >= MONSTERS.length ? 'ending' : 'victory'; render(); }
+function changeShopTab(tab) { AudioEngine.sfx.select(); state.shopTab = tab; render(); }
+
+function useRoulette() {
+    AudioEngine.sfx.heal();
+    state.rouletteUsed = true;
+    state.player.hp = 10;
+    state.screen = 'battle';
+    addLog("✨ 선생님 찬스! 기적적으로 체력 10으로 부활했습니다!", 'good');
+    showFloatingText('player', '+10', 'text-green-400 drop-shadow-md');
+    render();
+}
+
+function upgradeEquip(type) {
+    if (state.isAnimating) return;
+    let currentLv = state.player.equipLevel[type];
+    let nextUpgrade = UPGRADES[type][currentLv];
+    
+    if (nextUpgrade && state.player.gold >= nextUpgrade.price) {
+        AudioEngine.sfx.coin();
+        state.player.gold -= nextUpgrade.price;
+        
+        let prevUpgrade = currentLv > 0 ? UPGRADES[type][currentLv - 1] : null;
+        let diffAtk = (nextUpgrade.atk || 0) - (prevUpgrade ? (prevUpgrade.atk || 0) : 0);
+        let diffHp = (nextUpgrade.hp || 0) - (prevUpgrade ? (prevUpgrade.hp || 0) : 0);
+        let diffEn = (nextUpgrade.energy || 0) - (prevUpgrade ? (prevUpgrade.energy || 0) : 0);
+
+        if(diffAtk) state.player.atk += diffAtk;
+        if(diffHp) { state.player.maxHp += diffHp; state.player.hp += diffHp; }
+        if(diffEn) state.player.maxEnergy += diffEn;
+        
+        state.player.equipLevel[type]++;
+        
+        if(state.player.equipLevel[type] >= 4) {
+            unlockAchievement('maxUpgrade');
+        }
+        
+        saveGame();
+        let msgEl = $('shop-msg');
+        if(msgEl) {
+            msgEl.innerText = `${nextUpgrade.name} 업그레이드 완료!`;
+            // fadeIn을 사용하여 팝업 느낌을 없애고 부드럽게 글씨가 나타나게 처리
+            msgEl.classList.remove('fade-in'); void msgEl.offsetWidth; msgEl.classList.add('fade-in');
+            setTimeout(() => { if($('shop-msg')) $('shop-msg').innerText = ''; }, 2000);
+        }
+        render();
+    }
+}
+
+function buyItem(itemId, tab) {
+    if (state.isAnimating) return;
+    const item = SHOP_ITEMS[tab].find(i => i.id === itemId);
+    if (state.player.gold >= item.price) {
+        AudioEngine.sfx.coin();
+        state.player.gold -= item.price;
+        let msgStr = `${item.name} 구매 완료!`;
+        const res = item.action(state.player);
+        if(res) msgStr = res; 
+        if(tab === 'buff') item.bought = true; 
+
+        saveGame();
+        render();
+        const msgEl = $('shop-msg');
+        if(msgEl) {
+            msgEl.innerText = msgStr;
+            msgEl.classList.remove('fade-in'); void msgEl.offsetWidth; msgEl.classList.add('fade-in');
+            setTimeout(() => { if($('shop-msg')) $('shop-msg').innerText = ''; }, 2000);
+        }
+    }
+}
+
+function useSkill() {
+    if (state.isAnimating) return;
+    AudioEngine.sfx.select();
+    const cost = state.player.activeBuff === 'mana_surge' ? 0 : 3;
+    if (state.player.energy < cost) { addLog("기력이 부족합니다!", 'bad'); render(); return; }
+    
+    state.player.energy -= cost;
+    const cid = state.player.cls.id;
+    if (cid === 'scissors') { state.player.buff = 'double_dmg'; addLog("⚔️ 연속 베기! (승리 시 피해 2배)", 'info'); }
+    else if (cid === 'rock') { state.player.buff = 'shield'; addLog("🛡️ 철벽 방어! (피해 무효화)", 'info'); }
+    else if (cid === 'paper') { 
+        state.player.hp = Math.min(state.player.maxHp, state.player.hp + 20); AudioEngine.sfx.heal(); 
+        showFloatingText('player', '+20', 'text-green-400 drop-shadow-md');
+        addLog("✨ 치유의 종이학! 체력 20 회복.", 'good'); 
+    }
+    
+    if (hasAug('aug_meditation')) {
+        state.player.hp = Math.min(state.player.maxHp, state.player.hp + 15);
+        showFloatingText('player', '+15', 'text-green-400 drop-shadow-md');
+        addLog("🧘 명상 효과로 추가 15 체력 회복!", 'aug');
+    }
+    render();
+}
+
+function playTurn(playerMove) {
+    if (state.isAnimating || state.player.hp <= 0 || state.monsterHp <= 0) return;
+    state.isAnimating = true;
+
+    if(state.turnCount === 0 && state.crystalHintActive) {
+        state.player.inventory.crystal--;
+        state.crystalHintActive = false;
+    }
+
+    state.turnCount++;
+    state.player.stats[playerMove]++;
+    state.player.history.push(playerMove);
+    if(state.player.history.length > 5) state.player.history.shift();
+    
+    if (hasAug('aug_lucky') && Math.random() < 0.2) { state.player.energy = Math.min(state.player.maxEnergy, state.player.energy + 1); addLog("🍀 행운: 기력 +1!", 'aug'); }
+    if (hasAug('aug_last') && state.turnCount >= 5) { 
+        state.player.hp = Math.min(state.player.maxHp, state.player.hp + 3); 
+        showFloatingText('player', '+3', 'text-green-400 drop-shadow-md');
+        addLog("⏳ 장기전: 체력 +3!", 'aug'); 
+    }
+
+    const monMove = state.monsterNextMove;
+    const pName = MOVES[playerMove].name;
+    const mName = MOVES[monMove].name;
+    
+    if (state.monster.pattern === 'boss_golem' && state.turnCount % 3 === 1) addLog("⚠️ 골렘이 굳건한 방어 태세를 준비합니다!", 'bad');
+
+    addLog(`나: ${pName} VS 적: ${mName}`);
+    
+    let result = 0; 
+    if (playerMove === monMove) result = 0;
+    else if ((playerMove === 'scissors' && monMove === 'paper') || (playerMove === 'rock' && monMove === 'scissors') || (playerMove === 'paper' && monMove === 'rock')) result = 1;
+    else result = -1;
+
+    if (result === -1 && state.player.inventory.cloak > 0) {
+        result = 0; state.player.inventory.cloak--; addLog("🥷 망토 발동! 무승부로 회피.", 'info');
+    }
+    if (state.monsterStatus && state.monsterStatus.type === 'stunned') {
+        addLog("적은 기절해서 움직일 수 없다!", 'good');
+        if (result === -1) result = 0;
+    }
+
+    let lastTurnWasLoss = (state.player.lastResult === -1);
+    state.player.lastResult = result;
+    
+    let tUsed = state.player.tacticUsed;
+    let tactic = state.player.tactic;
+
+    if (result === 1) { 
+        state.player.animState = 'attack';
+        AudioEngine.sfx.hit();
+        state.player.consecutiveWins++;
+        state.player.consecutiveDraws = 0;
+        let dmg = state.player.atk;
+        
+        // 작전 효과 (승리 시)
+        if (!tUsed) {
+            if (tactic === 'ambush') { dmg += 3; addLog("🔪 기습 성공! 피해 +3", 'good'); state.player.tacticUsed = true; }
+            else if (tactic === 'reckless') { dmg += 5; addLog("🔥 무모한 돌진! 피해 +5", 'good'); state.player.tacticUsed = true; }
+            else if (tactic === 'vampire') { 
+                state.player.hp = Math.min(state.player.maxHp, state.player.hp + 5); 
+                showFloatingText('player', '+5', 'text-green-400 drop-shadow-md');
+                addLog("🧛 흡혈 태세! 체력 5 회복", 'good'); state.player.tacticUsed = true; 
+            }
+            else if (tactic === 'meditate') { dmg = Math.max(1, dmg - 2); addLog("🧘 명상 페널티: 피해 -2", 'bad'); state.player.tacticUsed = true; }
+            else if (tactic === 'thief') { state.player.gold += 10; addLog("💰 소매치기 성공! 10 골드", 'good'); state.player.tacticUsed = true; }
+            else if (tactic === 'sacrifice') { dmg += 6; addLog("🩸 혈투의 일격! 피해 +6", 'good'); state.player.tacticUsed = true; }
+            else if (tactic === 'berserk') { dmg *= 2; addLog("😡 광전사의 일격! 피해 2배!", 'good'); state.player.tacticUsed = true; }
+        }
+        
+        if (state.turnCount === 1 && hasAug('aug_first')) { dmg += 5; addLog("⚔️ 선봉장 효과! 피해 +5", 'aug'); }
+        if (hasAug('aug_revenge') && lastTurnWasLoss) { dmg += 5; addLog("😠 복수심 폭발! 피해 +5", 'aug'); }
+
+        if (state.player.cls.id === 'scissors') {
+            if (playerMove === 'scissors') dmg += 3;
+            if (state.player.consecutiveWins >= 3) { dmg *= 2; addLog("🌪️ 폭풍 베기! 피해 2배!", 'good'); }
+        }
+        if (state.player.cls.id === 'paper' && playerMove === 'paper') { state.monsterStatus = { type: 'sealed', move: monMove, duration: 1 }; addLog(`✋ 적의 행동 봉인!`, 'good'); }
+
+        if (state.monster.pattern === 'boss_golem' && playerMove === 'paper' && state.turnCount % 3 === 2) { dmg *= 2; addLog("💥 치명타!", 'good'); }
+        if (state.monster.pattern === 'boss_swordsman' && playerMove === 'rock') { state.monsterStatus = { type: 'stunned', duration: 1 }; addLog("💫 적 기절!", 'good'); }
+        if (state.monster.pattern === 'boss_demon' && new Set(state.player.history.slice(-3)).size === 3) { dmg = Math.floor(dmg * 1.5); addLog("🌀 마왕 혼란! 피해 1.5배!", 'good'); }
+
+        if (state.player.buff === 'double_dmg') { dmg *= 2; }
+        if (state.player.activeBuff === 'atk_boost') dmg = Math.floor(dmg * 1.5);
+        if (hasAug('aug_sc_dmg') && playerMove === 'scissors') dmg += 5;
+        if (hasAug('aug_berserk') && state.player.hp <= state.player.maxHp * 0.3) { dmg = Math.floor(dmg * 1.5); addLog("😡 광전사! 피해 1.5배!", 'aug'); }
+
+        state.monsterHp -= dmg;
+        state.player.energy = Math.min(state.player.maxEnergy, state.player.energy + 1);
+        
+        let msg = `공격 성공! ${dmg} 피해!`;
+        showFloatingText('monster', `-${dmg}`, 'text-white font-bold drop-shadow-[0_0_8px_rgba(239,68,68,1)] text-[40px]');
+
+        if (dmg >= 50) { unlockAchievement('overkill'); }
+
+        if (hasAug('aug_vampire')) { 
+            state.player.hp = Math.min(state.player.maxHp, state.player.hp + 3); msg += ` 🩸 흡혈 +3`; 
+            showFloatingText('player', '+3', 'text-green-400 drop-shadow-md');
+        }
+        if (hasAug('aug_combo') && state.player.consecutiveWins % 2 === 0) { state.player.energy = Math.min(state.player.maxEnergy, state.player.energy + 1); msg += ` 🥊 콤보 기력+1`; }
+        addLog(msg, 'good');
+
+        if (state.monsterHp < 0 && hasAug('aug_blood')) {
+            const overDmg = Math.abs(state.monsterHp);
+            state.player.hp = Math.min(state.player.maxHp, state.player.hp + overDmg);
+            showFloatingText('player', `+${overDmg}`, 'text-green-400 drop-shadow-md');
+            addLog(`🧛 초과 피해 흡수! 체력 ${overDmg} 회복`, 'aug');
+        }
+
+        if (hasAug('aug_focus') && state.player.consecutiveWins === 3) { state.player.energy = state.player.maxEnergy; addLog("🎯 3연승 기력 MAX!", 'aug'); state.player.consecutiveWins = 0; }
+        
+        if (state.player.consecutiveWins >= 3) { unlockAchievement('winStreak3'); }
+
+        state.shakeTarget = 'monster';
+        
+    } else if (result === 0) { 
+        state.player.animState = 'draw';
+        AudioEngine.sfx.select();
+        state.player.consecutiveWins = 0;
+        state.player.consecutiveDraws++;
+        let eGain = 2;
+        if (hasAug('aug_energy')) eGain += 1;
+        state.player.energy = Math.min(state.player.maxEnergy, state.player.energy + eGain);
+        
+        if (!tUsed) {
+            if (tactic === 'draw_heal') { 
+                state.player.hp = Math.min(state.player.maxHp, state.player.hp + 5); 
+                showFloatingText('player', '+5', 'text-green-400 drop-shadow-md');
+                addLog("🩹 숨 고르기: 체력 5 회복", 'good'); state.player.tacticUsed = true; 
+            }
+            else if (tactic === 'draw_energy') { state.player.energy = Math.min(state.player.maxEnergy, state.player.energy + 2); addLog("⚡ 기 모으기: 기력 +2", 'good'); state.player.tacticUsed = true; }
+        }
+
+        let msg = `서로 부딪혔다! 무승부. (기력+${eGain})`;
+        showFloatingText('monster', `무승부!`, 'text-blue-300 drop-shadow-md');
+
+        if (state.player.cls.id === 'paper') { state.player.hp = Math.min(state.player.maxHp, state.player.hp + 5); msg += ` 장막 회복+5`; showFloatingText('player','+5','text-green-400'); }
+        if (hasAug('aug_pp_heal') && playerMove === 'paper') { state.player.hp = Math.min(state.player.maxHp, state.player.hp + 7); msg += ` 🧻 마법 회복+7`; showFloatingText('player','+7','text-green-400');}
+        if (hasAug('aug_stone') && playerMove === 'rock') { state.player.hp = Math.min(state.player.maxHp, state.player.hp + 5); msg += ` 🗿 결의 회복+5`; showFloatingText('player','+5','text-green-400');}
+        if (hasAug('aug_wind')) { state.monsterHp -= 3; msg += ` 🌪️ 칼바람 피해 3!`; state.shakeTarget = 'monster'; showFloatingText('monster','-3','text-red-400');}
+        if (hasAug('aug_vital') && Math.random() < 0.5) { state.player.maxHp++; state.player.hp++; msg += ` 🍎 최대체력+1`; showFloatingText('player','+1','text-yellow-400');}
+
+        if (state.monster.pattern === 'boss_demon') { state.monsterHp += 15; msg += ` 👿 마왕 체력 회복!`; showFloatingText('monster','+15','text-green-400');}
+        addLog(msg, 'info');
+
+        if (state.player.consecutiveDraws >= 5) { unlockAchievement('drawStreak5'); }
+        
+    } else { 
+        state.player.animState = 'hit';
+        AudioEngine.sfx.lose();
+        state.player.consecutiveWins = 0;
+        state.player.consecutiveDraws = 0;
+        let dmg = state.monster.atk;
+        
+        if (!tUsed) {
+            if (tactic === 'ambush') { dmg += 2; addLog("⚠️ 기습 실패: 피해 +2", 'bad'); state.player.tacticUsed = true; }
+            else if (tactic === 'defend') { dmg = Math.max(1, dmg - 3); addLog("🛡️ 방어 태세: 피해 -3", 'info'); state.player.tacticUsed = true; }
+            else if (tactic === 'reflect') { state.monsterHp -= 4; showFloatingText('monster','-4','text-red-400'); addLog("🪞 방패 치기: 적에게 4 피해 반사!", 'good'); state.player.tacticUsed = true; }
+            else if (tactic === 'berserk') { dmg *= 2; addLog("😡 광전사 페널티: 피해 2배!", 'bad'); state.player.tacticUsed = true; }
+            else if (tactic === 'iron') { dmg = 0; addLog("🧱 단단한 피부: 첫 피해 무효화!", 'good'); state.player.tacticUsed = true; }
+            else if (tactic === 'scout') { dmg += 3; addLog("⚠️ 정찰 페널티: 피해 +3", 'bad'); state.player.tacticUsed = true; }
+        }
+
+        if (hasAug('aug_iron') && !state.player.firstDmgTaken) {
+            dmg = 0; state.player.firstDmgTaken = true; addLog("🛡️ 무쇠 피부로 첫 피해를 막았습니다!", 'aug');
+        } 
+        else if (hasAug('aug_shadow') && state.player.hp <= 15 && Math.random() < 0.5) {
+            dmg = 0; addLog("🌑 그림자 망토! 적의 공격을 회피했습니다!", 'aug');
+        }
+        else if (state.player.buff === 'shield') {
+            dmg = 0; addLog("철벽 방어로 공격을 막아냈습니다!", 'good');
+        } else {
+            if (state.player.cls.id === 'rock' && state.player.hp <= state.player.maxHp * 0.3) dmg = Math.floor(dmg / 2);
+            if (state.player.cls.id === 'rock' && playerMove === 'rock') dmg = Math.max(1, dmg - 3);
+            if (hasAug('aug_rk_def') && playerMove === 'rock') dmg = Math.max(1, dmg - 4);
+            if (hasAug('aug_mana_shield') && state.player.energy > 0) { state.player.energy--; dmg = Math.max(0, dmg - 5); addLog("💠 마나 실드: 기력 1소모, 피해 5 감소!", 'aug'); }
+            if (state.monster.pattern === 'boss_swordsman' && playerMove === 'paper') dmg = Math.floor(dmg * 1.5);
+        }
+        
+        state.player.hp -= dmg;
+        state.player.firstDmgTaken = true;
+        if(dmg > 0) {
+            addLog(`적의 공격에 당했다... ${dmg} 피해!`, 'bad');
+            showFloatingText('player', `-${dmg}`, 'text-red-500 drop-shadow-md text-[40px]');
+        }
+
+        let reflectDmg = 0;
+        if (hasAug('aug_thorns') && dmg > 0) reflectDmg += 3;
+        if (state.player.activeBuff === 'thorns_aura' && dmg > 0) reflectDmg += 5;
+        if (hasAug('aug_mirror') && dmg >= 10) reflectDmg += 5;
+
+        if (reflectDmg > 0) { 
+            state.monsterHp -= reflectDmg; 
+            showFloatingText('monster', `-${reflectDmg}`, 'text-red-400 drop-shadow-md');
+            addLog(`💥 반사 효과로 적에게 ${reflectDmg} 피해!`, 'aug'); 
+        }
+        
+        state.shakeTarget = 'player';
+    }
+    
+    state.player.buff = null;
+    if (state.monsterStatus) { state.monsterStatus.duration--; if (state.monsterStatus.duration <= 0) state.monsterStatus = null; }
+    
+    // 렌더링 호출을 한 번만 실행하여 DOM 재생성 방지
+    render();
+
+    setTimeout(() => {
+        state.player.animState = 'idle';
+        state.shakeTarget = null;
+        state.floatingTexts = []; // 데미지 중복 애니메이션 방지를 위한 초기화
+
+        if (state.player.hp <= 0) {
+            if (state.player.revives > 0) {
+                state.player.revives--; state.player.hp = Math.floor(state.player.maxHp * 0.5); AudioEngine.sfx.heal();
+                unlockAchievement('revived');
+                addLog("✨ 부활의 십자가! 체력 50%로 부활!", 'good'); 
+                showFloatingText('player', '부활!', 'text-yellow-400 drop-shadow-md');
+                state.shakeTarget = 'player';
+                state.isAnimating = false;
+                render();
+            } else { 
+                state.screen = 'gameover'; AudioEngine.sfx.lose(); 
+                state.isAnimating = false;
+                render(); 
+            }
+        } else if (state.monsterHp <= 0) {
+            processBattleVictory();
+        } else {
+            determineMonsterMove(); 
+            state.isAnimating = false;
+            render();
+        }
+    }, 1000); // 애니메이션 대기 시간을 늘려 타격감을 살림
+}
+
+function processBattleVictory() {
+    AudioEngine.sfx.win();
+
+    if (state.player.hp === 1 && !state.achievements.survive1Hp) {
+        state.achievements.survive1Hp = true;
+        addLog("🏆 칭찬 스티커: 기적의 생존자 달성!", 'good');
+    }
+
+    let goldGain = state.monster.goldReward;
+    if (hasAug('aug_rich')) goldGain += 15;
+    if (hasAug('aug_gamble') && Math.random() < 0.2) { goldGain *= 2; addLog(`🎲 승부사: 골드 2배!`, 'aug'); }
+    if (hasAug('aug_bounty') && [3,7,11,15,19].includes(state.stage)) { goldGain += 100; addLog(`🐉 드래곤 슬레이어: 보스 보상 +100G!`, 'aug'); }
+    
+    addLog(`전투 승리! ${state.monster.exp}EXP, 💰${goldGain} 골드 획득.`, 'good');
+    state.player.exp += state.monster.exp;
+    state.player.gold += goldGain;
+    
+    if (state.player.gold >= 300) { unlockAchievement('rich'); }
+
+    if (state.player.exp >= state.player.level * 50) {
+        state.player.level++; state.player.maxHp += 15; state.player.hp = state.player.maxHp; state.player.atk += 3;
+        addLog(`🎉 레벨 업! Lv.${state.player.level} 달성!`, 'good');
+    }
+    
+    state.player.activeBuff = null;
+    SHOP_ITEMS.buff.forEach(i => i.bought = false);
+    
+    saveGame(); 
+
+    state.stage++;
+    if (state.stage >= MONSTERS.length) {
+        state.screen = 'ending';
+    } else {
+        let availableAugs = AUGMENTS.filter(a => !hasAug(a.id) && !state.player.seenAugments.includes(a.id));
+        if (availableAugs.length < 3) {
+            availableAugs = AUGMENTS.filter(a => !hasAug(a.id));
+        }
+        state.offeredAugments = availableAugs.sort(() => 0.5 - Math.random()).slice(0, 3);
+        state.offeredAugments.forEach(a => { if(!state.player.seenAugments.includes(a.id)) state.player.seenAugments.push(a.id); });
+        
+        state.screen = 'augmentSelect';
+    }
+    state.isAnimating = false;
+    render();
+}
+
+function selectAugment(augId) {
+    if (state.isAnimating) return;
+    AudioEngine.sfx.select();
+    const aug = AUGMENTS.find(a => a.id === augId);
+    state.player.augments.push(aug);
+    if (aug.id === 'aug_giant') { state.player.maxHp += 20; state.player.hp += 20; }
+    
+    if (state.player.augments.length >= 7) { unlockAchievement('collector'); }
+    
+    saveGame();
+    state.screen = 'victory';
+    render();
+}
+
+function restartGame() {
+    AudioEngine.sfx.select();
+    state.screen = 'title';
+    SHOP_ITEMS.buff.forEach(i => i.bought = false);
+    render();
+}
+
+function render() {
+    const container = $('game-container');
+    let html = '';
+    
+    const currentRegionObj = REGIONS.find(r => r.id === state.currentRegion) || REGIONS[0];
+    const bgImage = './assets_bg/' + currentRegionObj.bg;
+    const titleBg = './assets_bg/' + REGIONS[0].bg; 
+
+    const audioBtn = `<button onclick="AudioEngine.toggle()" class="absolute top-6 right-8 z-50 text-5xl bg-slate-800/80 backdrop-blur-sm border-4 border-slate-600 rounded-full p-4 shadow-xl hover:bg-slate-700 active:scale-95 transition-all focus:outline-none">${AudioEngine.muted ? '🔇' : '🔊'}</button>`;
+
+    // 트랜지션 클래스: 이전 스크린과 다를 때만 fade-in 애니메이션 부여
+    let transitionClass = '';
+    if (state.lastRenderedScreen !== state.screen) {
+        transitionClass = 'fade-in';
+        state.lastRenderedScreen = state.screen;
+    }
+
+    if (state.screen === 'title') {
+        const canLoad = !!localStorage.getItem('rpsRPG_save');
+        html = audioBtn + `
+            <div class="flex flex-col items-center justify-center h-full p-8 text-center ${transitionClass} bg-cover bg-center relative" style="background-image: url('${titleBg}');">
+                <div class="absolute inset-0 bg-slate-900/70 z-0"></div>
+                <div class="z-10 relative flex flex-col items-center justify-center w-full">
+                    <div class="text-[120px] mb-6 drop-shadow-xl">✌️✊✋</div>
+                    <h1 class="text-[80px] font-bold text-yellow-400 mb-6 title-font drop-shadow-lg leading-tight">가위바위보 왕국 RPG</h1>
+                    <p class="text-slate-300 mb-6 mt-6 text-3xl font-bold drop-shadow">총 5개의 지역, 20개의 스테이지!</p>
+                    <p class="text-slate-200 mb-14 text-2xl leading-relaxed text-balance drop-shadow-md">단순한 가위바위보가 아닙니다.<br>전투 기술을 구사하고 적의 심리를 읽어내세요!</p>
+                    <div class="flex gap-6">
+                        <button onclick="startGame()" class="bg-blue-600 hover:bg-blue-500 text-white font-bold py-6 px-16 rounded-3xl shadow-2xl border-b-8 border-blue-800 active:border-b-0 active:mt-2 transition-all text-4xl">새 모험 시작</button>
+                        ${canLoad ? `<button onclick="loadGame()" class="bg-green-600 hover:bg-green-500 text-white font-bold py-6 px-16 rounded-3xl shadow-2xl border-b-8 border-green-800 active:border-b-0 active:mt-2 transition-all text-4xl">이어서 하기</button>` : ''}
+                    </div>
+                </div>
+            </div>
+        `;
+    }
+    else if (state.screen === 'difficultySelect') {
+        html = audioBtn + `
+            <div class="flex flex-col h-full p-10 ${transitionClass} bg-cover bg-center relative" style="background-image: url('${titleBg}');">
+                <div class="absolute inset-0 bg-slate-900/80 z-0"></div>
+                <div class="z-10 relative flex flex-col h-full w-full max-w-5xl mx-auto items-center justify-center">
+                    <h2 class="text-6xl text-center text-yellow-400 mb-12 title-font drop-shadow-md">난이도 선택</h2>
+                    <div class="flex gap-8 w-full">
+                        <button onclick="selectDifficulty('easy')" class="flex-1 bg-slate-800/80 backdrop-blur-md hover:bg-slate-700 p-10 rounded-3xl border-4 border-green-500 flex flex-col items-center text-center transition-all hover:-translate-y-2 shadow-2xl group focus:outline-none">
+                            <div class="text-[80px] mb-4">👼</div>
+                            <h3 class="text-4xl font-bold text-green-400 mb-4 drop-shadow">쉬움 모드</h3>
+                            <p class="text-xl text-slate-200 leading-relaxed text-balance">시작 골드 +100G<br>기본 체력 +20<br>가볍게 즐기기 좋습니다.</p>
+                        </button>
+                        <button onclick="selectDifficulty('normal')" class="flex-1 bg-slate-800/80 backdrop-blur-md hover:bg-slate-700 p-10 rounded-3xl border-4 border-red-500 flex flex-col items-center text-center transition-all hover:-translate-y-2 shadow-2xl group focus:outline-none">
+                            <div class="text-[80px] mb-4">⚔️</div>
+                            <h3 class="text-4xl font-bold text-red-400 mb-4 drop-shadow">보통 모드</h3>
+                            <p class="text-xl text-slate-200 leading-relaxed text-balance">기본 설정으로 진행합니다.<br>진정한 RPG의 맛!</p>
+                        </button>
+                    </div>
+                </div>
+            </div>
+        `;
+    }
+    else if (state.screen === 'classSelect') {
+        html = audioBtn + `
+            <div class="flex flex-col h-full p-10 ${transitionClass} bg-cover bg-center relative" style="background-image: url('${titleBg}');">
+                <div class="absolute inset-0 bg-slate-900/80 z-0"></div>
+                <div class="z-10 relative flex flex-col h-full w-full max-w-7xl mx-auto">
+                    <h2 class="text-6xl text-center text-yellow-400 mb-12 title-font drop-shadow-md">직업 선택</h2>
+                    <div class="flex-1 grid grid-cols-1 md:grid-cols-3 gap-8 w-full">
+                        ${Object.keys(CLASSES).map(key => `
+                            <button onclick="selectClass('${key}')" class="bg-slate-800/80 backdrop-blur-md hover:bg-slate-700 p-8 rounded-3xl border-4 border-slate-500 flex flex-col items-center text-center transition-all hover:-translate-y-2 shadow-2xl group focus:outline-none h-full">
+                                <img src="./assets_hero/${CLASSES[key].imgPrefix}_idle.png" class="border-4 border-slate-500 rounded-3xl shrink-0 mb-6 group-hover:border-yellow-400 transition-colors shadow-inner bg-white object-cover" style="width: 280px; height: 280px; image-rendering: pixelated;" alt="${CLASSES[key].name}">
+                                <div class="flex flex-col flex-1 w-full justify-between">
+                                    <h3 class="text-4xl font-bold text-white mb-4 drop-shadow">${CLASSES[key].name}</h3>
+                                    <p class="text-xl text-slate-200 leading-relaxed text-balance flex-1 mb-6 drop-shadow">${CLASSES[key].desc}</p>
+                                    <p class="text-2xl text-blue-300 font-bold bg-slate-900/70 p-4 rounded-xl border border-slate-600 shadow-inner w-full">✨스킬: ${CLASSES[key].skillName}</p>
+                                </div>
+                            </button>
+                        `).join('')}
+                    </div>
+                </div>
+            </div>
+        `;
+    }
+    else if (state.screen === 'regionIntro') {
+        const region = REGIONS.find(r => r.id === state.currentRegion);
+        html = audioBtn + `
+            <div class="flex flex-col items-center justify-center h-full p-10 text-center ${transitionClass} bg-cover bg-center relative" style="background-image: url('${bgImage}');">
+                <div class="absolute inset-0 bg-slate-900/70 z-0"></div>
+                <div class="z-10 relative flex flex-col items-center justify-center w-full">
+                    <h2 class="text-7xl font-bold text-green-400 mb-12 title-font drop-shadow-lg">${region.name}</h2>
+                    <div class="bg-slate-800/80 backdrop-blur-md p-12 rounded-3xl border-4 border-slate-500 shadow-2xl mb-16 max-w-4xl w-full">
+                        <p class="text-slate-200 text-3xl leading-relaxed text-balance drop-shadow">${region.desc}</p>
+                    </div>
+                    <button onclick="startTacticSelect()" class="bg-blue-600 hover:bg-blue-500 text-white font-bold py-6 px-24 rounded-3xl shadow-xl border-b-8 border-blue-800 active:border-b-0 active:mt-2 transition-all text-4xl">진입하기</button>
+                </div>
+            </div>
+        `;
+    }
+    else if (state.screen === 'tacticSelect') {
+        const mon = state.monster;
+        const tacticsHtml = state.offeredTacticsOptions.map(t => `
+            <button onclick="chooseTactic('${t.id}')" class="bg-slate-800/80 backdrop-blur-md hover:bg-slate-700 p-8 rounded-3xl border-4 border-slate-500 text-left transition-all hover:-translate-y-2 flex flex-col shadow-2xl focus:outline-none group">
+                <div class="text-5xl mb-6 drop-shadow group-hover:scale-110 transition-transform">${t.icon}</div>
+                <h3 class="text-3xl font-bold text-white mb-4 drop-shadow">${t.name}</h3>
+                <p class="text-xl text-slate-200 mt-auto leading-relaxed drop-shadow">${t.desc}</p>
+            </button>
+        `).join('');
+
+        html = audioBtn + `
+            <div class="flex flex-col h-full p-10 ${transitionClass} bg-cover bg-center relative" style="background-image: url('${bgImage}');">
+                <div class="absolute inset-0 bg-slate-900/80 z-0"></div>
+                <div class="z-10 relative flex flex-col h-full items-center justify-center">
+                    <div class="text-center mb-12">
+                        <div class="text-2xl text-red-300 font-bold mb-4 tracking-widest bg-red-900/50 inline-block px-4 py-2 rounded-full border border-red-500/50 backdrop-blur-sm">STAGE ${state.stage + 1}</div>
+                        <div class="text-[120px] mb-6 drop-shadow-2xl opacity-90">${mon.icon}</div>
+                        <h2 class="text-6xl font-bold text-white title-font drop-shadow-lg mb-4">야생의 ${mon.name} 발견!</h2>
+                        <p class="text-2xl text-slate-300 drop-shadow">전투에 앞서 작전을 선택하세요.</p>
+                    </div>
+                    <div class="grid grid-cols-1 md:grid-cols-3 gap-8 max-w-6xl w-full">
+                        ${tacticsHtml}
+                    </div>
+                </div>
+            </div>
+        `;
+    }
+    else if (state.screen === 'battle') {
+        const mon = state.monster;
+        const p = state.player;
+        const monHpPercent = Math.max(0, (state.monsterHp / mon.hp) * 100);
+        const pHpPercent = Math.max(0, (p.hp / p.maxHp) * 100);
+        
+        let hintText = mon.hints[state.monsterNextMove];
+        let showVisualBubble = false;
+        let visualBubbleIcon = '';
+
+        if (state.crystalHintActive && state.turnCount === 0) { 
+            hintText = `<span class="text-pink-400 font-bold drop-shadow">🔮 [수정구 발동] 다음 공격은 완벽히 보입니다!</span>`; 
+            showVisualBubble = true; visualBubbleIcon = MOVE_ICONS[state.monsterNextMove];
+        } 
+        else if (state.player.tactic === 'scout' && state.turnCount === 0) { 
+            hintText = `<span class="text-pink-400 font-bold drop-shadow">🔭 [정찰 확신] 적의 첫 공격을 꿰뚫어봅니다.</span>`; 
+            showVisualBubble = true; visualBubbleIcon = MOVE_ICONS[state.monsterNextMove];
+        }
+        else if (state.player.tactic === 'observe' && state.turnCount === 0) { 
+            hintText = `<span class="text-blue-300 font-bold drop-shadow">👁️ [관찰 확신] 적의 행동을 정확히 예측했습니다.</span>`; 
+            showVisualBubble = true; visualBubbleIcon = MOVE_ICONS[state.monsterNextMove];
+        }
+        else { hintText = `"💡 ${hintText}"`; }
+        
+        const currentTactic = TACTICS.find(t => t.id === p.tactic);
+        let tacticBadge = '';
+        if (currentTactic && !p.tacticUsed && !['observe', 'lucky'].includes(p.tactic)) {
+            tacticBadge = `<span class="text-lg font-bold text-slate-100 bg-slate-700/80 border-2 border-slate-400 px-4 py-1.5 rounded-full shadow-md backdrop-blur-sm">${currentTactic.icon} ${currentTactic.name} 대기</span>`;
+        }
+
+        html = audioBtn + `
+            <div class="flex flex-col md:flex-row h-full w-full bg-cover bg-center relative ${transitionClass}" style="background-image: url('${bgImage}');">
+                <div class="absolute inset-0 bg-slate-900/60 z-0"></div>
+                
+                <!-- 몬스터 영역 -->
+                <div class="w-full md:w-[55%] flex flex-col border-b-4 md:border-b-0 md:border-r-4 border-slate-700/50 h-full relative z-10">
+                    <div class="flex-1 flex flex-col items-center justify-center p-8 relative ${state.shakeTarget === 'monster' ? 'anim-shake' : ''}">
+                        
+                        <!-- 플로팅 텍스트 렌더링 (몬스터) -->
+                        ${state.floatingTexts.filter(f=>f.target==='monster').map(f => `<div class="anim-float font-black ${f.colorClass}" style="left:50%; top:40%; margin-left:-20px;">${f.text}</div>`).join('')}
+                        
+                        <div class="text-xl font-bold mb-4 text-slate-300 tracking-widest bg-slate-900/60 px-5 py-2 rounded-full backdrop-blur-sm border border-slate-600">STAGE ${state.stage + 1} / 20</div>
+                        
+                        <div class="relative">
+                            <div class="text-[140px] mb-6 drop-shadow-2xl opacity-90">${mon.icon}</div>
+                            ${showVisualBubble ? `
+                                <div class="absolute -top-6 -right-12 bg-white/90 rounded-full p-4 text-6xl shadow-2xl border-4 border-slate-300 anim-bubble z-20 flex items-center justify-center" style="width:100px; height:100px;">
+                                    ${visualBubbleIcon}
+                                </div>
+                            ` : ''}
+                        </div>
+
+                        <div class="text-4xl font-bold text-white title-font flex gap-3 items-center drop-shadow-lg">
+                            ${mon.name}
+                            ${state.monsterStatus && state.monsterStatus.type === 'sealed' ? '<span class="text-xl bg-red-600 px-3 py-1 rounded-lg shadow-md">봉인됨</span>' : ''}
+                            ${state.monsterStatus && state.monsterStatus.type === 'stunned' ? '<span class="text-xl bg-yellow-600 px-3 py-1 rounded-lg text-yellow-900 shadow-md">기절함</span>' : ''}
+                        </div>
+                        
+                        <div class="w-3/4 max-w-md h-10 bg-slate-900/80 backdrop-blur-sm rounded-full mt-8 overflow-hidden border-4 border-slate-600 shadow-inner relative">
+                            <div class="h-full bg-red-500 transition-all duration-300" style="width: ${monHpPercent}%"></div>
+                            <div class="absolute inset-0 flex items-center justify-center text-lg font-bold text-white drop-shadow-md tracking-widest">${Math.max(0, state.monsterHp)} / ${mon.hp}</div>
+                        </div>
+                        
+                        <div class="mt-8 bg-slate-800/80 backdrop-blur-md border-2 border-slate-500 rounded-2xl p-6 text-2xl text-center shadow-2xl relative w-4/5 min-h-[100px] flex items-center justify-center text-balance leading-relaxed">
+                            <div class="absolute -top-3 left-1/2 transform -translate-x-1/2 w-6 h-6 bg-slate-800/80 border-t-2 border-l-2 border-slate-500 rotate-45"></div>
+                            ${hintText}
+                        </div>
+                    </div>
+                    
+                    <!-- 로그 영역 -->
+                    <div class="h-1/3 min-h-[200px] max-h-[300px] bg-slate-900/70 backdrop-blur-md border-t-4 border-slate-700/50 p-6 overflow-y-auto no-scrollbar text-xl flex flex-col-reverse gap-2 leading-relaxed shadow-inner">
+                        ${state.log.map(l => `<div>${l}</div>`).join('')}
+                    </div>
+                </div>
+
+                <!-- 플레이어 영역 -->
+                <div class="w-full md:w-[45%] p-6 lg:p-10 flex flex-col h-full overflow-y-auto no-scrollbar relative z-10 bg-slate-900/60 backdrop-blur-md ${state.shakeTarget === 'player' ? 'anim-shake' : ''}">
+                    
+                    <!-- 플로팅 텍스트 렌더링 (플레이어) -->
+                    ${state.floatingTexts.filter(f=>f.target==='player').map(f => `<div class="anim-float font-black ${f.colorClass}" style="left:20%; top:20%; font-size:40px;">${f.text}</div>`).join('')}
+
+                    <div class="flex items-center gap-6 mb-6 bg-slate-800/70 backdrop-blur-sm p-5 rounded-3xl border border-slate-600 shadow-lg">
+                        <img src="./assets_hero/${p.cls.imgPrefix}_${p.animState}.png" class="border-4 border-slate-500 rounded-3xl shrink-0 shadow-lg bg-white object-contain" style="width: 180px; height: 180px; image-rendering: pixelated;" alt="Player">
+                        <div class="flex-1">
+                            <div class="text-4xl font-bold text-blue-300 title-font leading-tight mb-3 drop-shadow">Lv.${p.level} ${p.cls.name}</div>
+                            <div class="text-base text-slate-200 font-bold bg-slate-900/80 inline-block px-4 py-2 rounded-xl border border-slate-600 shadow-inner">
+                                ⚔️ ${p.atk} &nbsp;|&nbsp; 💰 ${p.gold} &nbsp;|&nbsp; 💣 ${p.inventory.bomb} &nbsp;|&nbsp; 💥 ${p.inventory.flash}
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div class="mb-6">
+                        <div class="flex justify-between text-lg font-bold text-slate-200 mb-2 px-1 drop-shadow">
+                            <span>❤️ 생명력 (HP)</span>
+                        </div>
+                        <div class="h-10 bg-slate-900/80 backdrop-blur-sm rounded-full overflow-hidden border-4 border-slate-600 relative shadow-inner">
+                            <div class="h-full ${p.hp <= p.maxHp * 0.3 ? 'bg-red-500 animate-pulse' : 'bg-green-500'} transition-all duration-300" style="width: ${pHpPercent}%"></div>
+                            <div class="absolute inset-0 flex items-center justify-center text-xl font-bold text-white drop-shadow-md tracking-widest">${Math.max(0, p.hp)} / ${p.maxHp}</div>
+                        </div>
+                    </div>
+                    
+                    <div class="mb-6">
+                        <div class="flex justify-between text-lg font-bold text-slate-200 mb-2 px-1 drop-shadow">
+                            <span>⚡ 기력 (Energy)</span>
+                        </div>
+                        <div class="flex gap-2 h-8">
+                            ${Array.from({length: p.maxEnergy}).map((_, i) => `
+                                <div class="flex-1 border-2 border-slate-600 rounded-lg ${i < p.energy ? 'bg-yellow-400 shadow-[0_0_15px_rgba(250,204,21,0.6)]' : 'bg-slate-900/80'}"></div>
+                            `).join('')}
+                        </div>
+                    </div>
+
+                    <div class="flex flex-wrap gap-3 mb-6 min-h-[40px]">
+                        ${tacticBadge}
+                        ${p.buff ? `<span class="text-lg font-bold text-yellow-100 bg-yellow-700/80 border-2 border-yellow-500 px-4 py-1.5 rounded-full shadow-md animate-pulse backdrop-blur-sm">🌟 스킬 장전</span>` : ''}
+                    </div>
+
+                    <div class="grid grid-cols-2 gap-4 mt-auto">
+                        <button onclick="playTurn('scissors')" class="bg-slate-800/80 backdrop-blur-sm hover:bg-slate-700 border-4 border-slate-500 rounded-3xl py-6 shadow-xl active:scale-95 transition-all flex flex-col items-center justify-center gap-3 group focus:outline-none">
+                            <span class="text-6xl group-hover:scale-110 transition-transform drop-shadow-md">✌️</span>
+                            <span class="text-2xl text-slate-200 font-bold drop-shadow">쌍검 베기</span>
+                        </button>
+                        <button onclick="playTurn('rock')" class="bg-slate-800/80 backdrop-blur-sm hover:bg-slate-700 border-4 border-slate-500 rounded-3xl py-6 shadow-xl active:scale-95 transition-all flex flex-col items-center justify-center gap-3 group focus:outline-none">
+                            <span class="text-6xl group-hover:scale-110 transition-transform drop-shadow-md">✊</span>
+                            <span class="text-2xl text-slate-200 font-bold drop-shadow">방패 강타</span>
+                        </button>
+                        <button onclick="playTurn('paper')" class="bg-slate-800/80 backdrop-blur-sm hover:bg-slate-700 border-4 border-slate-500 rounded-3xl py-6 shadow-xl active:scale-95 transition-all flex flex-col items-center justify-center gap-3 group focus:outline-none">
+                            <span class="text-6xl group-hover:scale-110 transition-transform drop-shadow-md">✋</span>
+                            <span class="text-2xl text-slate-200 font-bold drop-shadow">마법 장막</span>
+                        </button>
+                        <button onclick="useSkill()" class="${p.energy >= (p.activeBuff==='mana_surge'?0:3) ? 'bg-purple-600/90 hover:bg-purple-500 border-purple-400' : 'bg-slate-800/80 text-slate-500 border-slate-600'} backdrop-blur-sm border-4 rounded-3xl py-6 shadow-xl active:scale-95 transition-all flex flex-col items-center justify-center gap-3 group focus:outline-none">
+                            <span class="text-6xl ${p.energy >= (p.activeBuff==='mana_surge'?0:3) ? 'group-hover:scale-110 transition-transform drop-shadow-md' : 'opacity-50'}">✨</span>
+                            <span class="text-2xl font-bold ${p.energy >= (p.activeBuff==='mana_surge'?0:3) ? 'text-white drop-shadow' : 'text-slate-500'}">${p.activeBuff==='mana_surge'?'스킬(0)':'스킬(3)'}</span>
+                        </button>
+                    </div>
+                </div>
+            </div>
+        `;
+    }
+    else if (state.screen === 'augmentSelect') {
+        const augHtml = state.offeredAugments.map(aug => `
+            <button onclick="selectAugment('${aug.id}')" class="bg-slate-800/80 backdrop-blur-md hover:bg-slate-700 border-4 border-purple-500 rounded-3xl p-8 text-left shadow-2xl active:scale-95 transition-all hover:-translate-y-2 flex flex-col focus:outline-none">
+                <h3 class="text-3xl font-bold text-white mb-4 drop-shadow">${aug.name}</h3>
+                <p class="text-xl text-purple-200 leading-relaxed drop-shadow-sm">${aug.desc}</p>
+            </button>
+        `).join('');
+
+        html = audioBtn + `
+            <div class="flex flex-col h-full p-10 ${transitionClass} bg-cover bg-center relative" style="background-image: url('${bgImage}');">
+                <div class="absolute inset-0 bg-slate-900/70 z-0"></div>
+                <div class="z-10 relative flex flex-col h-full items-center justify-center">
+                    <div class="text-center mb-16">
+                        <h2 class="text-6xl font-bold text-yellow-400 title-font mb-6 drop-shadow-lg">전투 보상 선택</h2>
+                        <p class="text-2xl text-slate-200 drop-shadow-md">모험에 도움이 될 증강을 하나 선택하세요.<br>(게임 종료 시까지 영구 누적 적용)</p>
+                    </div>
+                    <div class="grid grid-cols-1 md:grid-cols-3 gap-8 w-full max-w-6xl">
+                        ${augHtml}
+                    </div>
+                </div>
+            </div>
+        `;
+    }
+    else if (state.screen === 'victory') {
+        html = audioBtn + `
+            <div class="flex flex-col h-full p-10 ${transitionClass} bg-cover bg-center relative items-center justify-center" style="background-image: url('${bgImage}');">
+                <div class="absolute inset-0 bg-slate-900/70 z-0"></div>
+                <div class="z-10 relative flex flex-col items-center justify-center w-full max-w-4xl">
+                    <div class="text-[120px] mb-8 drop-shadow-2xl">🎉</div>
+                    <h2 class="text-6xl font-bold text-yellow-400 mb-10 title-font drop-shadow-lg">정비 시간</h2>
+                    
+                    <div class="bg-slate-800/80 backdrop-blur-md rounded-[2rem] p-10 w-full mb-12 text-left border-4 border-slate-500 shadow-2xl flex gap-10 items-center">
+                        <img src="./assets_hero/${state.player.cls.imgPrefix}_idle.png" class="border-4 border-slate-500 rounded-3xl shrink-0 shadow-xl bg-white object-contain" style="width: 200px; height: 200px; image-rendering: pixelated;" alt="Player">
+                        <div class="flex-1">
+                            <p class="text-slate-200 mb-6 font-bold text-3xl drop-shadow">나의 상태: Lv.${state.player.level} ${state.player.cls.name}</p>
+                            <div class="grid grid-cols-2 gap-x-6 gap-y-4 text-2xl font-bold">
+                                <p class="bg-slate-900/60 p-4 rounded-xl border border-slate-600 shadow-inner">❤️ 체력: <span class="text-green-400">${state.player.hp}/${state.player.maxHp}</span></p>
+                                <p class="bg-slate-900/60 p-4 rounded-xl border border-slate-600 shadow-inner">⚔️ 공격력: <span class="text-blue-400">${state.player.atk}</span></p>
+                                <p class="bg-slate-900/60 p-4 rounded-xl border border-slate-600 shadow-inner">💰 소지 골드: <span class="text-yellow-400">${state.player.gold} G</span></p>
+                                <p class="bg-slate-900/60 p-4 rounded-xl border border-slate-600 shadow-inner">🔮 수정구: <span class="text-pink-400">${state.player.inventory.crystal}개</span></p>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="flex gap-4 w-full mb-8">
+                        <button onclick="openShop()" class="flex-1 bg-yellow-600 hover:bg-yellow-500 text-white font-bold py-6 rounded-3xl shadow-xl border-b-8 border-yellow-800 active:border-b-0 active:mt-2 transition-all text-2xl flex items-center justify-center gap-4">🛒 상점 둘러보기</button>
+                        <button onclick="openBestiary()" class="flex-1 bg-purple-600 hover:bg-purple-500 text-white font-bold py-6 rounded-3xl shadow-xl border-b-8 border-purple-800 active:border-b-0 active:mt-2 transition-all text-2xl flex items-center justify-center gap-4">📖 몬스터 도감</button>
+                        <button onclick="openAchievements()" class="flex-1 bg-pink-600 hover:bg-pink-500 text-white font-bold py-6 rounded-3xl shadow-xl border-b-8 border-pink-800 active:border-b-0 active:mt-2 transition-all text-2xl flex items-center justify-center gap-4">🏅 업적 현황</button>
+                    </div>
+                    
+                    <button onclick="checkRegionStart()" class="w-full max-w-4xl bg-blue-600 hover:bg-blue-500 text-white font-bold py-8 rounded-3xl shadow-2xl border-b-8 border-blue-800 active:border-b-0 active:mt-2 transition-all text-4xl">다음 장소로 출발</button>
+                </div>
+            </div>
+        `;
+    }
+    else if (state.screen === 'shop') {
+        const tabs = [
+            { id: 'equip', name: '장비 업그레이드' }, { id: 'consumable', name: '전략 및 소모품' }, { id: 'buff', name: '일회용 버프' }
+        ];
+
+        let itemsHtml = '';
+
+        if (state.shopTab === 'equip') {
+            const types = ['weapon', 'armor', 'accessory'];
+            const typeNames = { weapon: '무기', armor: '방어구', accessory: '장신구' };
+            itemsHtml = types.map(type => {
+                let currentLv = state.player.equipLevel[type];
+                let nextUpgrade = UPGRADES[type][currentLv];
+                
+                if (nextUpgrade) {
+                    const canBuy = state.player.gold >= nextUpgrade.price;
+                    let btnStr = `💰 ${nextUpgrade.price}`;
+                    let colorClass = nextUpgrade.level === 1 ? 'text-slate-200' : (nextUpgrade.level === 2 ? 'text-blue-300' : (nextUpgrade.level === 3 ? 'text-purple-300' : 'text-pink-400'));
+                    
+                    return `
+                    <div class="bg-slate-800/80 backdrop-blur-md p-6 rounded-3xl border-4 ${canBuy ? 'border-slate-500 hover:-translate-y-1 transition-transform shadow-lg' : 'border-slate-600 opacity-60'} flex justify-between items-center">
+                        <div class="flex-1 pr-6">
+                            <h3 class="text-2xl font-bold ${colorClass} mb-3 drop-shadow">[Lv.${nextUpgrade.level}] ${nextUpgrade.name}</h3>
+                            <p class="text-lg text-slate-300 leading-relaxed text-balance drop-shadow-sm">${nextUpgrade.desc} <span class="text-base text-yellow-400 font-bold ml-2">(현재 Lv.${currentLv})</span></p>
+                        </div>
+                        <button onclick="upgradeEquip('${type}')" ${!canBuy ? 'disabled' : ''} class="${canBuy ? 'bg-blue-600 hover:bg-blue-500 border-blue-800 shadow-xl' : 'bg-slate-700 cursor-not-allowed border-slate-800 text-slate-400'} text-2xl font-bold py-5 px-8 rounded-2xl border-b-8 active:border-b-0 active:mt-2 transition-all shrink-0 focus:outline-none">
+                            ${btnStr}
+                        </button>
+                    </div>`;
+                } else {
+                    return `
+                    <div class="bg-slate-800/50 backdrop-blur-md p-6 rounded-3xl border-4 border-slate-600 opacity-80 flex justify-between items-center">
+                        <div class="flex-1 pr-6">
+                            <h3 class="text-2xl font-bold text-yellow-300 mb-3 drop-shadow">${typeNames[type]} 마스터 달성!</h3>
+                            <p class="text-lg text-slate-400 leading-relaxed text-balance drop-shadow-sm">최고 등급까지 업그레이드 완료 (Lv.${currentLv})</p>
+                        </div>
+                        <button disabled class="bg-slate-700 cursor-not-allowed border-slate-800 text-yellow-500 text-2xl font-bold py-5 px-8 rounded-2xl border-b-8 shrink-0 focus:outline-none">MAX</button>
+                    </div>`;
+                }
+            }).join('');
+        } else {
+            itemsHtml = SHOP_ITEMS[state.shopTab].map(item => {
+                const canBuy = state.player.gold >= item.price && !item.bought;
+                let btnStr = item.bought ? '품절' : `💰 ${item.price}`;
+                return `
+                <div class="bg-slate-800/80 backdrop-blur-md p-6 rounded-3xl border-4 ${canBuy ? 'border-slate-500 hover:-translate-y-1 transition-transform shadow-lg' : 'border-slate-600 opacity-60'} flex justify-between items-center">
+                    <div class="flex-1 pr-6">
+                        <h3 class="text-2xl font-bold ${item.bought ? 'line-through text-slate-400' : 'text-white'} mb-3 drop-shadow">${item.name}</h3>
+                        <p class="text-lg text-slate-300 leading-relaxed text-balance drop-shadow-sm">${item.desc}</p>
+                    </div>
+                    <button onclick="buyItem('${item.id}', '${state.shopTab}')" ${!canBuy ? 'disabled' : ''} class="${canBuy ? 'bg-blue-600 hover:bg-blue-500 border-blue-800 shadow-xl' : 'bg-slate-700 cursor-not-allowed border-slate-800 text-slate-400'} text-2xl font-bold py-5 px-8 rounded-2xl border-b-8 active:border-b-0 active:mt-2 transition-all shrink-0 focus:outline-none">
+                        ${btnStr}
+                    </button>
+                </div>`;
+            }).join('');
+        }
+
+        html = audioBtn + `
+            <div class="flex flex-col h-full p-10 ${transitionClass} bg-cover bg-center relative" style="background-image: url('${bgImage}');">
+                <div class="absolute inset-0 bg-slate-900/80 z-0"></div>
+                <div class="z-10 relative flex flex-col h-full max-w-6xl mx-auto w-full">
+                    <div class="flex justify-between items-center mb-8 border-b-4 border-slate-700/50 pb-6 mt-4">
+                        <h2 class="text-6xl text-yellow-400 title-font drop-shadow-md">상점 🛒</h2>
+                        <div class="text-4xl font-bold text-yellow-300 bg-slate-900/80 backdrop-blur-sm px-8 py-4 rounded-3xl flex items-center gap-5 border-2 border-slate-600 shadow-inner">
+                            <img src="./assets_hero/${state.player.cls.imgPrefix}_idle.png" class="border-4 border-slate-500 rounded-2xl bg-white shadow-md object-contain" style="width: 80px; height: 80px; image-rendering: pixelated;" alt="Player">
+                            보유 골드: 💰 <span id="shop-gold">${state.player.gold}</span>
+                        </div>
+                    </div>
+
+                    <div class="flex gap-4 mb-0 z-10 relative">
+                        ${tabs.map(t => `
+                            <button onclick="changeShopTab('${t.id}')" class="flex-1 py-5 text-2xl font-bold rounded-t-3xl border-t-4 border-x-4 transition-all focus:outline-none backdrop-blur-md ${state.shopTab === t.id ? 'tab-active shadow-xl z-20 border-b-0' : 'tab-inactive border-b-4 hover:bg-slate-700'}">
+                                ${t.name}
+                            </button>
+                        `).join('')}
+                    </div>
+                    
+                    <div class="flex-1 overflow-y-auto no-scrollbar pb-6 bg-slate-900/60 backdrop-blur-sm p-8 rounded-b-3xl border-4 border-slate-600 relative z-0 shadow-inner">
+                        <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                            ${itemsHtml}
+                        </div>
+                    </div>
+                    
+                    <div id="shop-msg" class="text-center text-2xl text-green-400 h-10 font-bold mt-4 drop-shadow"></div>
+                    
+                    <button onclick="closeOverlay()" class="bg-slate-700 hover:bg-slate-600 text-white font-bold py-6 px-10 rounded-3xl shadow-xl border-b-8 border-slate-800 active:border-b-0 active:mt-2 transition-all w-full text-4xl mt-6">정비 화면으로 돌아가기</button>
+                </div>
+            </div>
+        `;
+    }
+    else if (state.screen === 'bestiary') {
+        const listHtml = MONSTERS.map(m => {
+            const unlocked = state.bestiary[m.id];
+            if (unlocked) {
+                return `
+                <div class="bg-slate-800/80 backdrop-blur-md p-6 rounded-3xl border-4 border-slate-500 flex gap-6 shadow-xl mb-6 items-center hover:-translate-y-1 transition-transform">
+                    <div class="text-[80px] drop-shadow-xl w-32 text-center">${m.icon}</div>
+                    <div class="flex-1">
+                        <h3 class="text-3xl font-bold text-white mb-2 drop-shadow">${m.name}</h3>
+                        <p class="text-lg font-bold text-yellow-300 mb-3 bg-slate-900/60 inline-block px-4 py-2 rounded-xl shadow-inner">주요 기술: ${m.fav}</p>
+                        <p class="text-xl text-slate-200 leading-relaxed text-balance drop-shadow-sm">${m.desc}</p>
+                    </div>
+                </div>`;
+            } else {
+                return `
+                <div class="bg-slate-900/80 backdrop-blur-md p-6 rounded-3xl border-4 border-slate-700 flex gap-6 shadow-lg mb-6 items-center opacity-50">
+                    <div class="text-[80px] w-32 text-center grayscale">❓</div>
+                    <div>
+                        <h3 class="text-3xl font-bold text-slate-500 mb-2">알 수 없는 몬스터</h3>
+                        <p class="text-xl text-slate-600 mt-2">아직 조우하지 않았습니다.</p>
+                    </div>
+                </div>`;
+            }
+        }).join('');
+
+        html = audioBtn + `
+            <div class="flex flex-col h-full p-10 ${transitionClass} bg-cover bg-center relative" style="background-image: url('${bgImage}');">
+                <div class="absolute inset-0 bg-slate-900/80 z-0"></div>
+                <div class="z-10 relative flex flex-col h-full max-w-6xl mx-auto w-full">
+                    <h2 class="text-6xl text-purple-400 title-font mb-10 mt-4 text-center drop-shadow-md">📖 전체 몬스터 도감</h2>
+                    <div class="flex-1 overflow-y-auto no-scrollbar pb-6 pr-4 grid grid-cols-1 md:grid-cols-2 gap-x-8">
+                        ${listHtml}
+                    </div>
+                    <button onclick="closeOverlay()" class="bg-slate-700 hover:bg-slate-600 text-white font-bold py-6 px-10 rounded-3xl shadow-xl border-b-8 border-slate-800 active:border-b-0 active:mt-2 transition-all w-full text-4xl mt-8">닫기</button>
+                </div>
+            </div>
+        `;
+    }
+    else if (state.screen === 'achievements') {
+        const achHtml = ACHIEVEMENTS_LIST.map(a => {
+            const unlocked = state.achievements[a.id];
+            return `
+            <div class="bg-slate-800/80 backdrop-blur-md p-6 rounded-3xl border-4 ${unlocked ? 'border-yellow-500 shadow-yellow-500/20' : 'border-slate-600 opacity-50'} flex gap-6 shadow-xl mb-6 items-center transition-all">
+                <div class="text-[60px] drop-shadow-xl w-24 text-center ${unlocked ? '' : 'grayscale'}">${unlocked ? '🏅' : '🔒'}</div>
+                <div class="flex-1">
+                    <h3 class="text-3xl font-bold ${unlocked ? 'text-yellow-400' : 'text-slate-400'} mb-2 drop-shadow">${a.name}</h3>
+                    <p class="text-xl text-slate-300 leading-relaxed text-balance drop-shadow-sm">${a.desc}</p>
+                </div>
+                <div class="text-2xl font-bold ${unlocked ? 'text-green-400' : 'text-slate-500'} pr-4">
+                    ${unlocked ? '달성!' : '미달성'}
+                </div>
+            </div>`;
+        }).join('');
+
+        html = audioBtn + `
+            <div class="flex flex-col h-full p-10 ${transitionClass} bg-cover bg-center relative" style="background-image: url('${bgImage}');">
+                <div class="absolute inset-0 bg-slate-900/80 z-0"></div>
+                <div class="z-10 relative flex flex-col h-full max-w-6xl mx-auto w-full">
+                    <h2 class="text-6xl text-pink-400 title-font mb-10 mt-4 text-center drop-shadow-md">🏅 업적 현황</h2>
+                    <div class="flex-1 overflow-y-auto no-scrollbar pb-6 pr-4">
+                        ${achHtml}
+                    </div>
+                    <button onclick="closeOverlay()" class="bg-slate-700 hover:bg-slate-600 text-white font-bold py-6 px-10 rounded-3xl shadow-xl border-b-8 border-slate-800 active:border-b-0 active:mt-2 transition-all w-full text-4xl mt-8">닫기</button>
+                </div>
+            </div>
+        `;
+    }
+    else if (state.screen === 'gameover') {
+        html = audioBtn + `
+            <div class="flex flex-col items-center justify-center h-full p-10 text-center ${transitionClass} bg-cover bg-center relative" style="background-image: url('${bgImage}');">
+                <div class="absolute inset-0 bg-red-900/80 z-0"></div>
+                <div class="z-10 relative flex flex-col items-center justify-center w-full">
+                    <div class="text-[160px] mb-8 drop-shadow-2xl">💀</div>
+                    <h2 class="text-[80px] font-bold text-red-400 mb-8 title-font drop-shadow-lg">게임 오버</h2>
+                    <p class="text-4xl text-yellow-300 font-bold mb-14 bg-slate-900/80 px-10 py-5 rounded-3xl border-4 border-red-500 shadow-2xl">최종 도달: STAGE ${state.stage + 1}</p>
+                    
+                    <div class="flex gap-6 w-full max-w-4xl justify-center">
+                        ${!state.rouletteUsed ? `<button onclick="useRoulette()" class="flex-1 bg-pink-600 hover:bg-pink-500 text-white font-bold py-8 px-10 rounded-3xl shadow-2xl border-b-8 border-pink-900 active:border-b-0 active:mt-2 transition-all text-4xl">✨ 운명의 룰렛<br><span class="text-xl">(선생님 찬스!)</span></button>` : ''}
+                        <button onclick="restartGame()" class="flex-1 bg-slate-800 hover:bg-slate-700 text-white font-bold py-8 px-10 rounded-3xl shadow-2xl border-b-8 border-slate-900 active:border-b-0 active:mt-2 transition-all text-4xl flex items-center justify-center">처음부터 다시 시작하기</button>
+                    </div>
+                </div>
+            </div>
+        `;
+    }
+    else if (state.screen === 'ending') {
+        const endingBg = './assets_bg/' + REGIONS[4].bg; 
+        html = audioBtn + `
+            <div class="flex flex-col items-center justify-center h-full p-10 text-center ${transitionClass} bg-cover bg-center relative" style="background-image: url('${endingBg}');">
+                <div class="absolute inset-0 bg-slate-900/70 z-0"></div>
+                <div class="z-10 relative flex flex-col items-center justify-center w-full max-w-5xl">
+                    <div class="text-[140px] mb-6 drop-shadow-2xl">🏆</div>
+                    <h2 class="text-7xl font-bold text-yellow-400 mb-6 title-font drop-shadow-lg">왕국 구출 성공!</h2>
+                    <p class="text-slate-100 mb-12 text-3xl font-bold leading-relaxed drop-shadow-md">무승부의 마왕을 물리치고 왕국에 평화를 가져왔습니다!<br>당신은 진정한 심리전의 마스터입니다.</p>
+                    
+                    <div class="bg-slate-800/80 backdrop-blur-md rounded-[2rem] p-10 w-full mb-12 text-left border-4 border-slate-600 shadow-2xl flex items-center justify-between">
+                        <div>
+                            <h3 class="text-4xl text-yellow-300 font-bold mb-6 drop-shadow">나의 모험 기록</h3>
+                            <div class="flex gap-6 items-center mb-6">
+                                <img src="./assets_hero/${state.player.cls.imgPrefix}_idle.png" class="border-4 border-slate-500 rounded-3xl shrink-0 bg-white shadow-xl object-contain" style="width: 100px; height: 100px; image-rendering: pixelated;" alt="Player">
+                                <p class="text-green-300 font-bold text-4xl drop-shadow">최종 레벨: Lv.${state.player.level} ${state.player.cls.name}</p>
+                            </div>
+                        </div>
+                        <div class="text-2xl font-bold text-slate-200 bg-slate-900/60 p-8 rounded-3xl border-2 border-slate-700 space-y-4 text-right shadow-inner">
+                            <p>✌️ 쌍검 베기: <span class="text-white">${state.player.stats.scissors}회</span></p>
+                            <p>✊ 방패 강타: <span class="text-white">${state.player.stats.rock}회</span></p>
+                            <p>✋ 마법 장막: <span class="text-white">${state.player.stats.paper}회</span></p>
+                        </div>
+                    </div>
+                    
+                    <div class="flex gap-8 w-full">
+                        <button onclick="openAchievements()" class="flex-1 bg-pink-600 hover:bg-pink-500 text-white font-bold py-8 px-10 rounded-3xl shadow-2xl border-b-8 border-pink-800 active:border-b-0 active:mt-2 transition-all text-3xl flex items-center justify-center gap-4">🏅 업적 현황</button>
+                        <button onclick="openBestiary()" class="flex-1 bg-purple-600 hover:bg-purple-500 text-white font-bold py-8 px-10 rounded-3xl shadow-2xl border-b-8 border-purple-800 active:border-b-0 active:mt-2 transition-all text-3xl flex items-center justify-center gap-4">📖 전체 도감</button>
+                        <button onclick="restartGame()" class="flex-[2] bg-blue-600 hover:bg-blue-500 text-white font-bold py-8 px-10 rounded-3xl shadow-2xl border-b-8 border-blue-800 active:border-b-0 active:mt-2 transition-all text-4xl">새 모험 시작</button>
+                    </div>
+                </div>
+            </div>
+        `;
+    }
+    
+    container.innerHTML = html;
+}
+
+window.onload = () => { render(); };
+</script>
+</body>
+</html>
