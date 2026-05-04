@@ -10,7 +10,7 @@
         
         body {
             font-family: 'Gowun Dodum', sans-serif;
-            background-color: #1e293b;
+            background-color: #0f172a;
             color: #f8fafc;
             touch-action: manipulation;
             margin: 0;
@@ -60,12 +60,45 @@
 
         .tab-active { background-color: #2563eb; color: white; border-color: #1e40af; }
         .tab-inactive { background-color: rgba(51, 65, 85, 0.8); color: #94a3b8; border-color: #475569; }
+
+        /* 모바일 세로 모드일 때 보여줄 오버레이 */
+        #portrait-warning {
+            display: none;
+            position: fixed;
+            top: 0; left: 0; width: 100%; height: 100%;
+            background-color: #0f172a;
+            z-index: 99999;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            text-align: center;
+        }
+
+        /* 기기가 세로 방향(Portrait)일 때의 처리 */
+        @media screen and (orientation: portrait) {
+            #portrait-warning {
+                display: flex;
+            }
+            #main-wrapper {
+                display: none !important;
+            }
+        }
     </style>
 </head>
 <body class="w-screen h-[100dvh] text-slate-100 flex flex-col">
 
-    <div id="game-container" class="w-full h-full flex flex-col relative bg-slate-900 overflow-hidden">
-        <!-- JS 렌더링 영역 -->
+    <!-- 세로 화면(Portrait) 경고 오버레이 -->
+    <div id="portrait-warning">
+        <div class="text-[120px] mb-6 anim-bubble">🔄</div>
+        <h1 class="text-5xl font-bold text-yellow-400 mb-6 title-font drop-shadow-md">가로 화면 권장</h1>
+        <p class="text-2xl text-slate-300 leading-relaxed">원활한 플레이를 위해 기기를 회전하여<br><span class="font-bold text-white">가로 화면</span>으로 플레이해주세요!</p>
+    </div>
+
+    <!-- 가로 화면 시 렌더링 될 실제 게임 래퍼 -->
+    <div id="main-wrapper" class="w-full h-full flex flex-col relative">
+        <div id="game-container" class="w-full h-full flex flex-col relative bg-slate-900 overflow-hidden">
+            <!-- JS 렌더링 영역 -->
+        </div>
     </div>
 
 <script>
@@ -220,6 +253,7 @@ const ACHIEVEMENTS_LIST = [
     { id: 'maxUpgrade', name: '⚒️ 전설의 장인', desc: '상점에서 장비 하나를 에픽 등급까지 강화했다!' }
 ];
 
+// 게임 밸런스 조정: 총 2,550 골드로 에픽 풀 업그레이드 가능하도록 조정
 const UPGRADES = {
     weapon: [
         { level: 1, name: '일반: 강철 검 🗡️', desc: '공격력 +4', price: 60, atk: 4 },
@@ -266,26 +300,31 @@ const REGIONS = [
 ];
 
 const MONSTERS = [
+    // 1장
     { id: 'm1', name: '바위 골렘 🗿', hp: 30, atk: 4, exp: 20, goldReward: 20, icon: '🗿', pattern: 'boss_golem', fav: '✊ 방패 강타', dialogue: '"부순다."', hints: { rock: '육중한 기운을 모아 단단하게 뭉칩니다.', paper: '양팔을 좌우로 넓게 벌리며 빈틈을 보입니다.', scissors: '팔의 모서리를 예리한 각도로 세웁니다.' } },
     { id: 'm2', name: '조약돌 두더지 🪨', hp: 40, atk: 5, exp: 25, goldReward: 25, icon: '🐹', pattern: 'heavy_rock', fav: '✊ 방패 강타', dialogue: '"단단한 것만 믿는다!"', hints: { rock: '몸의 중심을 낮추고 둥글게 힘을 응축시킵니다.', paper: '긴장을 풀고 주변의 공기를 넓게 가릅니다.', scissors: '어둠 속에서 서늘하고 뾰족한 기운이 스칩니다.' } },
     { id: 'm3', name: '가위 벌레 🐛', hp: 45, atk: 6, exp: 30, goldReward: 25, icon: '🐛', pattern: 'heavy_scissors', fav: '✌️ 쌍검 베기', dialogue: '"싹둑싹둑!"', hints: { rock: '스스로를 빈틈없는 둥근 형태로 말아냅니다.', paper: '더듬이를 유연하게 사방으로 뻗어냅니다.', scissors: '날카로운 두 갈래의 끝부분이 교차하며 마찰음을 냅니다.' } },
     { id: 'm5', name: '거대 풀잎 슬라임 🌱 (보스)', hp: 100, atk: 10, exp: 60, goldReward: 80, icon: '🌱', pattern: 'random', fav: '무작위', dialogue: '"거대한 말캉..."', hints: { rock: '알 수 없는 기운이 요동칩니다.', paper: '알 수 없는 기운이 요동칩니다.', scissors: '알 수 없는 기운이 요동칩니다.' } },
     
+    // 2장
     { id: 'm6', name: '패턴 늑대 🐺', hp: 70, atk: 9, exp: 40, goldReward: 35, icon: '🐺', pattern: 'random', fav: '무작위', dialogue: '"크르릉..."', hints: { rock: '근육을 팽팽하게 수축시키며 무게중심을 낮춥니다.', paper: '가벼운 스텝을 밟으며 활동 반경을 크게 넓힙니다.', scissors: '목줄기를 노리는 듯한 뾰족한 살기가 느껴집니다.' } },
     { id: 'm7', name: '강철 두더지 🛡️', hp: 85, atk: 11, exp: 50, goldReward: 40, icon: '🦡', pattern: 'heavy_rock', fav: '✊ 방패 강타', dialogue: '"절대 뚫리지 않아!"', hints: { rock: '무엇도 뚫지 못할 견고한 장벽을 형성합니다.', paper: '경계 태세를 허물고 양팔을 길게 늘어뜨립니다.', scissors: '번뜩이는 쇳소리와 함께 예리한 궤적을 그립니다.' } },
     { id: 'm9', name: '쌍검 암살자 ⚔️', hp: 80, atk: 15, exp: 60, goldReward: 50, icon: '🥷', pattern: 'heavy_scissors', fav: '✌️ 쌍검 베기', dialogue: '"눈보다 빠르지."', hints: { rock: '몸을 한껏 움츠려 모든 충격에 대비하는 자세를 취합니다.', paper: '발소리를 죽인 채 사방으로 그림자를 넓힙니다.', scissors: '차갑고 뾰족한 살기가 정면을 향해 두 갈래로 뻗어옵니다.' } },
     { id: 'm10', name: '타락한 검사 💀 (보스)', hp: 150, atk: 16, exp: 100, goldReward: 120, icon: '🧛', pattern: 'boss_swordsman', fav: '✌️ 쌍검 베기', dialogue: '"어설픈 마법은 찢길 뿐이다!"', hints: { rock: '움직임을 최소화하고 묵직한 기운을 갈무리합니다.', paper: '어두운 기운을 사방으로 흩날리며 빈틈을 유도합니다.', scissors: '공기를 찢는 듯한 서늘한 궤적이 번뜩입니다.' } },
     
+    // 3장
     { id: 'm4', name: '종이 유령 👻', hp: 90, atk: 12, exp: 55, goldReward: 45, icon: '👻', pattern: 'heavy_paper', fav: '✋ 마법 장막', dialogue: '"감싸주마..."', hints: { rock: '흐릿한 형체가 한 점으로 단단하게 응축됩니다.', paper: '자신의 영역을 무한히 넓히며 주변을 집어삼킬 듯 굽어봅니다.', scissors: '흐늘거리던 끝부분이 순간적으로 창끝처럼 벼려집니다.' } },
     { id: 'm8', name: '마법의 책 📘', hp: 110, atk: 14, exp: 65, goldReward: 55, icon: '📘', pattern: 'heavy_paper', fav: '✋ 마법 장막', dialogue: '"지식이 너를 삼킬 것이다."', hints: { rock: '모든 지식을 굳게 잠그고 어떠한 간섭도 거부합니다.', paper: '수많은 갈래로 쪼개진 지식들이 유연하게 허공을 춤춥니다.', scissors: '빳빳하게 굳어진 모서리가 예리하게 날을 세웁니다.' } },
     { id: 'm11', name: '불타는 슬라임 🔥', hp: 130, atk: 15, exp: 70, goldReward: 65, icon: '🔥', pattern: 'random', fav: '무작위', dialogue: '"다 태워버릴거야!"', hints: { rock: '뜨거운 기운이 폭발하기 직전처럼 둥글게 뭉쳐집니다.', paper: '맹렬한 화염이 사방으로 통제할 수 없이 번져나갑니다.', scissors: '가장 뜨거운 끝부분이 바늘처럼 뾰족하게 쏘아집니다.' } },
     { id: 'm14', name: '거울 정령 🪞 (보스)', hp: 180, atk: 18, exp: 120, goldReward: 130, icon: '🪞', pattern: 'counter', fav: '카운터', dialogue: '"네 습관은 거울에 비쳤다."', hints: { rock: '표면이 불투명해지며 모든 충격을 흡수할 태세를 갖춥니다.', paper: '경계가 허물어지며 끝없이 넓은 공간을 투영합니다.', scissors: '날카로운 조각들이 허공에 떠올라 예리한 빛을 반사합니다.' } },
     
+    // 4장
     { id: 'm12', name: '얼음 수정 ❄️', hp: 150, atk: 17, exp: 80, goldReward: 70, icon: '❄️', pattern: 'heavy_rock', fav: '✊ 방패 강타', dialogue: '"절대 영도를 맛보아라."', hints: { rock: '극한의 냉기가 뭉쳐 절대 부서지지 않을 결정체가 됩니다.', paper: '파동이 사방으로 흩날리며 넓은 범위를 얼어붙게 합니다.', scissors: '투명하고 예리한 냉기가 당신의 심장을 겨눕니다.' } },
     { id: 'm13', name: '맹독 거미 🕷️', hp: 160, atk: 20, exp: 90, goldReward: 75, icon: '🕷️', pattern: 'heavy_scissors', fav: '✌️ 쌍검 베기', dialogue: '"쉭쉭..."', hints: { rock: '몸을 한껏 웅크려 치명적인 타격으로부터 스스로를 보호합니다.', paper: '사방에 끈적한 기운을 넓게 흩뿌려 퇴로를 차단합니다.', scissors: '치명적인 독을 품은 뾰족한 두 개의 송곳니가 번뜩입니다.' } },
     { id: 'm16', name: '그림자 기사 👤', hp: 180, atk: 22, exp: 110, goldReward: 80, icon: '👤', pattern: 'rock_scissors', fav: '방패/쌍검', dialogue: '"이곳을 지나갈 수 없다."', hints: { rock: '어둠을 둥글게 뭉쳐 뚫을 수 없는 묵직한 벽을 세웁니다.', paper: '그림자가 사방으로 길게 늘어지며 공간을 지배합니다.', scissors: '서늘하게 벼려진 칠흑의 기운이 직선으로 쏘아집니다.' } },
     { id: 'm15', name: '왕실 근위대장 🛡️ (보스)', hp: 250, atk: 24, exp: 150, goldReward: 160, icon: '💂', pattern: 'heavy_paper', fav: '✋ 마법 장막', dialogue: '"왕실의 권위는 절대 무너지지 않는다."', hints: { rock: '양발을 굳게 딛고 산처럼 묵직한 태세를 취합니다.', paper: '화려한 기운을 펄럭이며 주변의 시야를 넓게 덮습니다.', scissors: '치명적인 일격을 위해 예리한 궤적을 그어냅니다.' } },
     
+    // 5장
     { id: 'm17', name: '환영 마법사 🔮', hp: 200, atk: 25, exp: 130, goldReward: 90, icon: '🔮', pattern: 'paper_scissors', fav: '장막/쌍검', dialogue: '"무엇이 진짜인지 보이나?"', hints: { rock: '마력이 하나의 둥근 구체로 빽빽하게 밀집됩니다.', paper: '복잡한 흐름이 바닥을 타고 거대하게 퍼져나갑니다.', scissors: '마력이 뾰족한 형태로 변환되어 주변을 맴돕니다.' } },
     { id: 'm18', name: '황금 골렘 👑', hp: 280, atk: 26, exp: 140, goldReward: 120, icon: '🪙', pattern: 'heavy_rock', fav: '✊ 방패 강타', dialogue: '"나의 황금은 부서지지 않는다."', hints: { rock: '눈부신 기운이 한 덩어리로 굳어지며 절대적인 무게감을 뽐냅니다.', paper: '찬란한 가루들이 대기 중으로 넓게 흩뿌려집니다.', scissors: '금빛의 끝자락이 날카로운 형태로 뾰족해집니다.' } },
     { id: 'm19', name: '마왕의 호위무사 👹', hp: 250, atk: 30, exp: 170, goldReward: 130, icon: '👹', pattern: 'heavy_scissors', fav: '✌️ 쌍검 베기', dialogue: '"마왕님을 위해 벤다!"', hints: { rock: '전신의 근육을 수축시키며 파괴적인 무게감을 버텨낼 준비를 합니다.', paper: '시커먼 기운을 사방으로 폭발시키며 모든 것을 뻗어냅니다.', scissors: '당신의 숨통을 끊어버릴 듯한 섬뜩하고 날카로운 살기가 뿜어집니다.' } },
@@ -465,6 +504,7 @@ function startBattle() {
     addLog(`STAGE ${state.stage + 1}: ${state.monster.name} 등장!`, 'bad');
     addLog(`"${state.monster.dialogue}"`, 'normal');
     
+    // 소비 아이템 자동 사용
     if (state.player.inventory.candy > 0) {
         state.player.energy = Math.min(state.player.maxEnergy, state.player.energy + 2);
         state.player.inventory.candy--; addLog(`🍬 집중의 사탕: 기력 +2`, 'info');
@@ -845,6 +885,7 @@ function processBattleVictory() {
         state.achievements.survive1Hp = true;
         addLog("🏆 칭찬 스티커: 기적의 생존자 달성!", 'good');
     }
+    if (!state.player.firstDmgTaken) { unlockAchievement('perfectWin'); }
 
     let goldGain = state.monster.goldReward;
     if (hasAug('aug_rich')) goldGain += 15;
@@ -936,6 +977,9 @@ function render() {
                         <button onclick="startGame()" class="bg-blue-600 hover:bg-blue-500 text-white font-bold py-4 md:py-6 px-6 md:px-16 rounded-2xl md:rounded-3xl shadow-2xl border-b-[6px] md:border-b-8 border-blue-800 active:border-b-0 active:mt-[6px] md:active:mt-2 transition-all text-2xl md:text-4xl">새 모험 시작</button>
                         ${canLoad ? `<button onclick="loadGame()" class="bg-green-600 hover:bg-green-500 text-white font-bold py-4 md:py-6 px-6 md:px-16 rounded-2xl md:rounded-3xl shadow-2xl border-b-[6px] md:border-b-8 border-green-800 active:border-b-0 active:mt-[6px] md:active:mt-2 transition-all text-2xl md:text-4xl">이어서 하기</button>` : ''}
                     </div>
+                    <div class="mt-8 text-red-400 font-bold text-base md:text-xl bg-slate-900/80 px-6 py-3 rounded-full border-2 border-red-500 animate-pulse backdrop-blur-sm hidden portrait-msg">
+                        📱 모바일은 가로 화면으로 기기를 회전하여 플레이하세요!
+                    </div>
                 </div>
             </div>
         `;
@@ -946,16 +990,16 @@ function render() {
                 <div class="absolute inset-0 bg-slate-900/80 z-0"></div>
                 <div class="z-10 relative flex flex-col items-center justify-center min-h-full py-12 px-6 w-full max-w-5xl mx-auto">
                     <h2 class="text-4xl md:text-6xl text-center text-yellow-400 mb-8 md:mb-12 title-font drop-shadow-md">난이도 선택</h2>
-                    <div class="flex flex-col md:flex-row gap-6 md:gap-8 w-full">
-                        <button onclick="selectDifficulty('easy')" class="flex-1 bg-slate-800/80 backdrop-blur-md hover:bg-slate-700 p-8 md:p-10 rounded-3xl border-4 border-green-500 flex flex-col items-center text-center transition-all hover:-translate-y-2 shadow-2xl group focus:outline-none">
+                    <div class="flex flex-row gap-4 md:gap-8 w-full">
+                        <button onclick="selectDifficulty('easy')" class="flex-1 bg-slate-800/80 backdrop-blur-md hover:bg-slate-700 p-6 md:p-10 rounded-3xl border-4 border-green-500 flex flex-col items-center text-center transition-all hover:-translate-y-2 shadow-2xl group focus:outline-none">
                             <div class="text-[60px] md:text-[80px] mb-2 md:mb-4">👼</div>
-                            <h3 class="text-3xl md:text-4xl font-bold text-green-400 mb-3 md:mb-4 drop-shadow">쉬움 모드</h3>
-                            <p class="text-lg md:text-xl text-slate-200 leading-relaxed text-balance">시작 골드 +100G<br>기본 체력 +20<br>가볍게 즐기기 좋습니다.</p>
+                            <h3 class="text-2xl md:text-4xl font-bold text-green-400 mb-3 md:mb-4 drop-shadow">쉬움 모드</h3>
+                            <p class="text-sm md:text-xl text-slate-200 leading-relaxed text-balance">시작 골드 +100G<br>기본 체력 +20<br>가볍게 즐기기 좋습니다.</p>
                         </button>
-                        <button onclick="selectDifficulty('normal')" class="flex-1 bg-slate-800/80 backdrop-blur-md hover:bg-slate-700 p-8 md:p-10 rounded-3xl border-4 border-red-500 flex flex-col items-center text-center transition-all hover:-translate-y-2 shadow-2xl group focus:outline-none">
+                        <button onclick="selectDifficulty('normal')" class="flex-1 bg-slate-800/80 backdrop-blur-md hover:bg-slate-700 p-6 md:p-10 rounded-3xl border-4 border-red-500 flex flex-col items-center text-center transition-all hover:-translate-y-2 shadow-2xl group focus:outline-none">
                             <div class="text-[60px] md:text-[80px] mb-2 md:mb-4">⚔️</div>
-                            <h3 class="text-3xl md:text-4xl font-bold text-red-400 mb-3 md:mb-4 drop-shadow">보통 모드</h3>
-                            <p class="text-lg md:text-xl text-slate-200 leading-relaxed text-balance">기본 설정으로 진행합니다.<br>진정한 RPG의 맛!</p>
+                            <h3 class="text-2xl md:text-4xl font-bold text-red-400 mb-3 md:mb-4 drop-shadow">보통 모드</h3>
+                            <p class="text-sm md:text-xl text-slate-200 leading-relaxed text-balance">기본 설정으로 진행합니다.<br>진정한 RPG의 맛!</p>
                         </button>
                     </div>
                 </div>
@@ -968,14 +1012,14 @@ function render() {
                 <div class="absolute inset-0 bg-slate-900/80 z-0"></div>
                 <div class="z-10 relative flex flex-col min-h-full py-12 px-6 w-full max-w-7xl mx-auto">
                     <h2 class="text-4xl md:text-6xl text-center text-yellow-400 mb-8 md:mb-12 title-font drop-shadow-md">직업 선택</h2>
-                    <div class="flex-1 grid grid-cols-1 md:grid-cols-3 gap-6 md:gap-8 w-full pb-8">
+                    <div class="flex-1 grid grid-cols-3 gap-4 md:gap-8 w-full pb-4">
                         ${Object.keys(CLASSES).map(key => `
-                            <button onclick="selectClass('${key}')" class="bg-slate-800/80 backdrop-blur-md hover:bg-slate-700 p-6 md:p-8 rounded-3xl border-4 border-slate-500 flex flex-col items-center text-center transition-all hover:-translate-y-2 shadow-2xl group focus:outline-none h-full">
-                                <img src="./assets_hero/${CLASSES[key].imgPrefix}_idle.png" class="border-4 border-slate-500 rounded-3xl shrink-0 mb-4 md:mb-6 group-hover:border-yellow-400 transition-colors shadow-inner bg-white object-cover" style="width: 200px; height: 200px; image-rendering: pixelated;" alt="${CLASSES[key].name}">
+                            <button onclick="selectClass('${key}')" class="bg-slate-800/80 backdrop-blur-md hover:bg-slate-700 p-4 md:p-8 rounded-3xl border-2 md:border-4 border-slate-500 flex flex-col items-center text-center transition-all hover:-translate-y-2 shadow-2xl group focus:outline-none h-full">
+                                <img src="./assets_hero/${CLASSES[key].imgPrefix}_idle.png" class="border-2 md:border-4 border-slate-500 rounded-2xl md:rounded-3xl shrink-0 mb-4 md:mb-6 group-hover:border-yellow-400 transition-colors shadow-inner bg-white object-cover" style="width: 120px; height: 120px; md:width: 200px; md:height: 200px; image-rendering: pixelated;" alt="${CLASSES[key].name}">
                                 <div class="flex flex-col flex-1 w-full justify-between">
-                                    <h3 class="text-3xl md:text-4xl font-bold text-white mb-2 md:mb-4 drop-shadow">${CLASSES[key].name}</h3>
-                                    <p class="text-lg md:text-xl text-slate-200 leading-relaxed text-balance flex-1 mb-4 md:mb-6 drop-shadow">${CLASSES[key].desc}</p>
-                                    <p class="text-xl md:text-2xl text-blue-300 font-bold bg-slate-900/70 p-3 md:p-4 rounded-xl border border-slate-600 shadow-inner w-full">✨스킬: ${CLASSES[key].skillName}</p>
+                                    <h3 class="text-xl md:text-4xl font-bold text-white mb-2 md:mb-4 drop-shadow">${CLASSES[key].name}</h3>
+                                    <p class="text-sm md:text-xl text-slate-200 leading-relaxed text-balance flex-1 mb-4 md:mb-6 drop-shadow">${CLASSES[key].desc}</p>
+                                    <p class="text-sm md:text-2xl text-blue-300 font-bold bg-slate-900/70 p-2 md:p-4 rounded-xl border border-slate-600 shadow-inner w-full break-keep">✨스킬: ${CLASSES[key].skillName}</p>
                                 </div>
                             </button>
                         `).join('')}
@@ -1002,24 +1046,24 @@ function render() {
     else if (state.screen === 'tacticSelect') {
         const mon = state.monster;
         const tacticsHtml = state.offeredTacticsOptions.map(t => `
-            <button onclick="chooseTactic('${t.id}')" class="bg-slate-800/80 backdrop-blur-md hover:bg-slate-700 p-6 md:p-8 rounded-3xl border-4 border-slate-500 text-left transition-all hover:-translate-y-2 flex flex-col shadow-2xl focus:outline-none group">
-                <div class="text-4xl md:text-5xl mb-4 md:mb-6 drop-shadow group-hover:scale-110 transition-transform">${t.icon}</div>
-                <h3 class="text-2xl md:text-3xl font-bold text-white mb-2 md:mb-4 drop-shadow">${t.name}</h3>
-                <p class="text-lg md:text-xl text-slate-200 mt-auto leading-relaxed drop-shadow">${t.desc}</p>
+            <button onclick="chooseTactic('${t.id}')" class="bg-slate-800/80 backdrop-blur-md hover:bg-slate-700 p-4 md:p-8 rounded-3xl border-2 md:border-4 border-slate-500 text-left transition-all hover:-translate-y-2 flex flex-col shadow-2xl focus:outline-none group">
+                <div class="text-4xl md:text-5xl mb-2 md:mb-6 drop-shadow group-hover:scale-110 transition-transform text-center sm:text-left">${t.icon}</div>
+                <h3 class="text-lg md:text-3xl font-bold text-white mb-2 md:mb-4 drop-shadow text-center sm:text-left">${t.name}</h3>
+                <p class="text-sm md:text-xl text-slate-200 mt-auto leading-relaxed drop-shadow text-center sm:text-left break-keep">${t.desc}</p>
             </button>
         `).join('');
 
         html = audioBtn + `
             <div class="overflow-y-auto w-full h-full ${transitionClass} bg-cover bg-center relative" style="background-image: url('${bgImage}');">
                 <div class="absolute inset-0 bg-slate-900/80 z-0"></div>
-                <div class="z-10 relative flex flex-col items-center justify-center min-h-full py-12 px-6">
+                <div class="z-10 relative flex flex-col items-center justify-center min-h-full py-12 px-6 w-full max-w-6xl mx-auto">
                     <div class="text-center mb-8 md:mb-12">
                         <div class="text-xl md:text-2xl text-red-300 font-bold mb-3 md:mb-4 tracking-widest bg-red-900/50 inline-block px-4 py-2 rounded-full border border-red-500/50 backdrop-blur-sm">STAGE ${state.stage + 1}</div>
                         <div class="text-[80px] md:text-[120px] mb-4 md:mb-6 drop-shadow-2xl opacity-90">${mon.icon}</div>
-                        <h2 class="text-4xl md:text-6xl font-bold text-white title-font drop-shadow-lg mb-3 md:mb-4 break-keep">야생의 ${mon.name} 발견!</h2>
-                        <p class="text-xl md:text-2xl text-slate-300 drop-shadow">전투에 앞서 작전을 선택하세요.</p>
+                        <h2 class="text-3xl md:text-6xl font-bold text-white title-font drop-shadow-lg mb-3 md:mb-4 break-keep">야생의 ${mon.name} 발견!</h2>
+                        <p class="text-lg md:text-2xl text-slate-300 drop-shadow">전투에 앞서 작전을 선택하세요.</p>
                     </div>
-                    <div class="grid grid-cols-1 md:grid-cols-3 gap-6 md:gap-8 max-w-6xl w-full pb-8">
+                    <div class="grid grid-cols-3 gap-4 md:gap-8 w-full pb-4">
                         ${tacticsHtml}
                     </div>
                 </div>
@@ -1057,13 +1101,13 @@ function render() {
         }
 
         html = audioBtn + `
-            <div class="overflow-y-auto md:overflow-hidden h-full w-full bg-cover bg-center relative ${transitionClass}" style="background-image: url('${bgImage}');">
+            <div class="overflow-hidden h-full w-full bg-cover bg-center relative ${transitionClass}" style="background-image: url('${bgImage}');">
                 <div class="absolute inset-0 bg-slate-900/60 z-0"></div>
                 
-                <div class="relative z-10 flex flex-col md:flex-row min-h-full md:h-full">
+                <div class="relative z-10 flex flex-row h-full">
                     <!-- 몬스터 영역 -->
-                    <div class="w-full md:w-[55%] flex flex-col border-b-4 md:border-b-0 md:border-r-4 border-slate-700/50 md:h-full shrink-0">
-                        <div class="flex-1 flex flex-col items-center justify-center p-6 md:p-8 relative ${state.shakeTarget === 'monster' ? 'anim-shake' : ''}">
+                    <div class="w-[55%] flex flex-col border-r-4 border-slate-700/50 h-full shrink-0">
+                        <div class="flex-1 flex flex-col items-center justify-center p-4 md:p-8 relative ${state.shakeTarget === 'monster' ? 'anim-shake' : ''}">
                             
                             <!-- 플로팅 텍스트 렌더링 (몬스터) -->
                             ${state.floatingTexts.filter(f=>f.target==='monster').map(f => `<div class="anim-float font-black ${f.colorClass}" style="left:50%; top:40%; margin-left:-20px;">${f.text}</div>`).join('')}
@@ -1071,7 +1115,7 @@ function render() {
                             <div class="text-sm md:text-xl font-bold mb-2 md:mb-4 text-slate-300 tracking-widest bg-slate-900/60 px-4 md:px-5 py-1.5 md:py-2 rounded-full backdrop-blur-sm border border-slate-600">STAGE ${state.stage + 1} / 20</div>
                             
                             <div class="relative">
-                                <div class="text-[80px] md:text-[140px] mb-4 md:mb-6 drop-shadow-2xl opacity-90">${mon.icon}</div>
+                                <div class="text-[80px] md:text-[140px] mb-2 md:mb-6 drop-shadow-2xl opacity-90">${mon.icon}</div>
                                 ${showVisualBubble ? `
                                     <div class="absolute -top-4 -right-8 md:-top-6 md:-right-12 bg-white/90 rounded-full p-2 md:p-4 text-4xl md:text-6xl shadow-2xl border-2 md:border-4 border-slate-300 anim-bubble z-20 flex items-center justify-center w-[60px] h-[60px] md:w-[100px] md:h-[100px]">
                                         ${visualBubbleIcon}
@@ -1079,31 +1123,31 @@ function render() {
                                 ` : ''}
                             </div>
 
-                            <div class="text-2xl md:text-4xl font-bold text-white title-font flex flex-wrap gap-2 md:gap-3 items-center justify-center drop-shadow-lg">
+                            <div class="text-2xl md:text-4xl font-bold text-white title-font flex flex-wrap gap-2 md:gap-3 items-center justify-center drop-shadow-lg text-center">
                                 ${mon.name}
                                 ${state.monsterStatus && state.monsterStatus.type === 'sealed' ? '<span class="text-sm md:text-xl bg-red-600 px-2 md:px-3 py-1 rounded-lg shadow-md">봉인됨</span>' : ''}
                                 ${state.monsterStatus && state.monsterStatus.type === 'stunned' ? '<span class="text-sm md:text-xl bg-yellow-600 px-2 md:px-3 py-1 rounded-lg text-yellow-900 shadow-md">기절함</span>' : ''}
                             </div>
                             
-                            <div class="w-4/5 max-w-md h-6 md:h-10 bg-slate-900/80 backdrop-blur-sm rounded-full mt-4 md:mt-8 overflow-hidden border-2 md:border-4 border-slate-600 shadow-inner relative">
+                            <div class="w-11/12 md:w-3/4 max-w-md h-6 md:h-10 bg-slate-900/80 backdrop-blur-sm rounded-full mt-4 md:mt-8 overflow-hidden border-2 md:border-4 border-slate-600 shadow-inner relative">
                                 <div class="h-full bg-red-500 transition-all duration-300" style="width: ${monHpPercent}%"></div>
                                 <div class="absolute inset-0 flex items-center justify-center text-sm md:text-lg font-bold text-white drop-shadow-md tracking-widest">${Math.max(0, state.monsterHp)} / ${mon.hp}</div>
                             </div>
                             
-                            <div class="mt-4 md:mt-8 bg-slate-800/80 backdrop-blur-md border-2 border-slate-500 rounded-2xl p-4 md:p-6 text-lg md:text-2xl text-center shadow-2xl relative w-11/12 md:w-4/5 min-h-[80px] md:min-h-[100px] flex items-center justify-center text-balance leading-relaxed">
+                            <div class="mt-4 md:mt-8 bg-slate-800/80 backdrop-blur-md border-2 border-slate-500 rounded-2xl p-4 md:p-6 text-sm md:text-2xl text-center shadow-2xl relative w-11/12 md:w-4/5 min-h-[80px] md:min-h-[100px] flex items-center justify-center text-balance leading-relaxed">
                                 <div class="absolute -top-2 md:-top-3 left-1/2 transform -translate-x-1/2 w-4 h-4 md:w-6 md:h-6 bg-slate-800/80 border-t-2 border-l-2 border-slate-500 rotate-45"></div>
                                 ${hintText}
                             </div>
                         </div>
                         
                         <!-- 로그 영역 -->
-                        <div class="h-40 md:h-1/3 md:min-h-[200px] md:max-h-[300px] bg-slate-900/70 backdrop-blur-md border-t-4 border-slate-700/50 p-4 md:p-6 overflow-y-auto no-scrollbar text-base md:text-xl flex flex-col-reverse gap-1 md:gap-2 leading-relaxed shadow-inner">
+                        <div class="h-1/3 md:min-h-[200px] md:max-h-[300px] bg-slate-900/70 backdrop-blur-md border-t-4 border-slate-700/50 p-4 md:p-6 overflow-y-auto no-scrollbar text-sm md:text-xl flex flex-col-reverse gap-1 md:gap-2 leading-relaxed shadow-inner">
                             ${state.log.map(l => `<div>${l}</div>`).join('')}
                         </div>
                     </div>
 
                     <!-- 플레이어 영역 -->
-                    <div class="w-full md:w-[45%] p-4 md:p-6 lg:p-10 flex flex-col md:h-full overflow-visible md:overflow-y-auto bg-slate-900/60 backdrop-blur-md ${state.shakeTarget === 'player' ? 'anim-shake' : ''} pb-10">
+                    <div class="w-[45%] p-4 md:p-6 lg:p-10 flex flex-col h-full overflow-y-auto no-scrollbar relative z-10 bg-slate-900/60 backdrop-blur-md ${state.shakeTarget === 'player' ? 'anim-shake' : ''} pb-10">
                         
                         <!-- 플로팅 텍스트 렌더링 (플레이어) -->
                         ${state.floatingTexts.filter(f=>f.target==='player').map(f => `<div class="anim-float font-black ${f.colorClass}" style="left:20%; top:20%; font-size:30px;">${f.text}</div>`).join('')}
@@ -1111,15 +1155,15 @@ function render() {
                         <div class="flex items-center gap-4 md:gap-6 mb-4 md:mb-6 bg-slate-800/70 backdrop-blur-sm p-3 md:p-5 rounded-3xl border border-slate-600 shadow-lg">
                             <img src="./assets_hero/${p.cls.imgPrefix}_${p.animState}.png" class="border-2 md:border-4 border-slate-500 rounded-2xl md:rounded-3xl shrink-0 shadow-lg bg-white object-cover" style="width: 80px; height: 80px; md:width: 180px; md:height: 180px; image-rendering: pixelated;" alt="Player">
                             <div class="flex-1">
-                                <div class="text-2xl md:text-4xl font-bold text-blue-300 title-font leading-tight mb-2 md:mb-3 drop-shadow">Lv.${p.level} ${p.cls.name}</div>
-                                <div class="text-sm md:text-base text-slate-200 font-bold bg-slate-900/80 inline-block px-3 md:px-4 py-1.5 md:py-2 rounded-xl border border-slate-600 shadow-inner break-keep">
+                                <div class="text-2xl md:text-4xl font-bold text-blue-300 title-font leading-tight mb-2 md:mb-3 drop-shadow break-keep">Lv.${p.level} <br class="md:hidden">${p.cls.name}</div>
+                                <div class="text-xs md:text-base text-slate-200 font-bold bg-slate-900/80 inline-block px-3 md:px-4 py-1.5 md:py-2 rounded-xl border border-slate-600 shadow-inner break-keep">
                                     ⚔️ ${p.atk} | 💰 ${p.gold} | 💣 ${p.inventory.bomb} | 💥 ${p.inventory.flash}
                                 </div>
                             </div>
                         </div>
                         
                         <div class="mb-4 md:mb-6">
-                            <div class="flex justify-between text-sm md:text-lg font-bold text-slate-200 mb-1.5 md:mb-2 px-1 drop-shadow">
+                            <div class="flex justify-between text-xs md:text-lg font-bold text-slate-200 mb-1.5 md:mb-2 px-1 drop-shadow">
                                 <span>❤️ 생명력 (HP)</span>
                             </div>
                             <div class="h-6 md:h-10 bg-slate-900/80 backdrop-blur-sm rounded-full overflow-hidden border-2 md:border-4 border-slate-600 relative shadow-inner">
@@ -1129,7 +1173,7 @@ function render() {
                         </div>
                         
                         <div class="mb-4 md:mb-6">
-                            <div class="flex justify-between text-sm md:text-lg font-bold text-slate-200 mb-1.5 md:mb-2 px-1 drop-shadow">
+                            <div class="flex justify-between text-xs md:text-lg font-bold text-slate-200 mb-1.5 md:mb-2 px-1 drop-shadow">
                                 <span>⚡ 기력 (Energy)</span>
                             </div>
                             <div class="flex gap-1 md:gap-2 h-5 md:h-8">
@@ -1141,7 +1185,7 @@ function render() {
 
                         <div class="flex flex-wrap gap-2 md:gap-3 mb-4 md:mb-6 min-h-[30px] md:min-h-[40px]">
                             ${tacticBadge}
-                            ${p.buff ? `<span class="text-sm md:text-lg font-bold text-yellow-100 bg-yellow-700/80 border-2 border-yellow-500 px-3 md:px-4 py-1 md:py-1.5 rounded-full shadow-md animate-pulse backdrop-blur-sm">🌟 스킬 장전</span>` : ''}
+                            ${p.buff ? `<span class="text-xs md:text-lg font-bold text-yellow-100 bg-yellow-700/80 border-2 border-yellow-500 px-3 md:px-4 py-1 md:py-1.5 rounded-full shadow-md animate-pulse backdrop-blur-sm">🌟 스킬 장전</span>` : ''}
                         </div>
 
                         <div class="grid grid-cols-2 gap-3 md:gap-4 mt-auto">
@@ -1159,7 +1203,7 @@ function render() {
                             </button>
                             <button onclick="useSkill()" class="${p.energy >= (p.activeBuff==='mana_surge'?0:3) ? 'bg-purple-600/90 hover:bg-purple-500 border-purple-400' : 'bg-slate-800/80 text-slate-500 border-slate-600'} backdrop-blur-sm border-2 md:border-4 rounded-2xl md:rounded-3xl py-4 md:py-6 shadow-xl active:scale-95 transition-all flex flex-col items-center justify-center gap-2 md:gap-3 group focus:outline-none">
                                 <span class="text-4xl md:text-6xl ${p.energy >= (p.activeBuff==='mana_surge'?0:3) ? 'group-hover:scale-110 transition-transform drop-shadow-md' : 'opacity-50'}">✨</span>
-                                <span class="text-base md:text-2xl font-bold ${p.energy >= (p.activeBuff==='mana_surge'?0:3) ? 'text-white drop-shadow' : 'text-slate-500'}">${p.activeBuff==='mana_surge'?'스킬(0)':'스킬(3)'}</span>
+                                <span class="text-sm md:text-2xl font-bold ${p.energy >= (p.activeBuff==='mana_surge'?0:3) ? 'text-white drop-shadow' : 'text-slate-500'}">${p.activeBuff==='mana_surge'?'스킬(0)':'스킬(3)'}</span>
                             </button>
                         </div>
                     </div>
@@ -1198,23 +1242,23 @@ function render() {
                     <div class="text-[80px] md:text-[120px] mb-4 md:mb-8 drop-shadow-2xl">🎉</div>
                     <h2 class="text-5xl md:text-6xl font-bold text-yellow-400 mb-8 md:mb-10 title-font drop-shadow-lg">정비 시간</h2>
                     
-                    <div class="bg-slate-800/80 backdrop-blur-md rounded-[2rem] p-6 md:p-10 w-full mb-8 md:mb-12 text-left border-4 border-slate-500 shadow-2xl flex flex-col sm:flex-row gap-6 md:gap-10 items-center sm:items-start">
-                        <img src="./assets_hero/${state.player.cls.imgPrefix}_idle.png" class="border-4 border-slate-500 rounded-3xl shrink-0 shadow-xl bg-white object-contain w-[120px] h-[120px] md:w-[200px] md:h-[200px]" style="image-rendering: pixelated;" alt="Player">
-                        <div class="flex-1 w-full text-center sm:text-left">
-                            <p class="text-slate-200 mb-4 md:mb-6 font-bold text-2xl md:text-3xl drop-shadow">나의 상태: Lv.${state.player.level} ${state.player.cls.name}</p>
-                            <div class="grid grid-cols-2 gap-x-4 gap-y-3 md:gap-x-6 md:gap-y-4 text-lg md:text-2xl font-bold">
+                    <div class="bg-slate-800/80 backdrop-blur-md rounded-[2rem] p-6 md:p-10 w-full mb-8 md:mb-12 text-left border-4 border-slate-500 shadow-2xl flex flex-row gap-6 md:gap-10 items-center">
+                        <img src="./assets_hero/${state.player.cls.imgPrefix}_idle.png" class="border-4 border-slate-500 rounded-3xl shrink-0 shadow-xl bg-white object-cover" style="width: 120px; height: 120px; md:width: 200px; md:height: 200px; image-rendering: pixelated;" alt="Player">
+                        <div class="flex-1 w-full text-left">
+                            <p class="text-slate-200 mb-4 md:mb-6 font-bold text-2xl md:text-3xl drop-shadow">나의 상태: Lv.${state.player.level} <br class="md:hidden">${state.player.cls.name}</p>
+                            <div class="grid grid-cols-2 gap-x-4 gap-y-3 md:gap-x-6 md:gap-y-4 text-sm md:text-2xl font-bold">
                                 <p class="bg-slate-900/60 p-3 md:p-4 rounded-xl border border-slate-600 shadow-inner">❤️ 체력: <span class="text-green-400">${state.player.hp}/${state.player.maxHp}</span></p>
                                 <p class="bg-slate-900/60 p-3 md:p-4 rounded-xl border border-slate-600 shadow-inner">⚔️ 공격력: <span class="text-blue-400">${state.player.atk}</span></p>
-                                <p class="bg-slate-900/60 p-3 md:p-4 rounded-xl border border-slate-600 shadow-inner">💰 소지 골드: <span class="text-yellow-400">${state.player.gold} G</span></p>
+                                <p class="bg-slate-900/60 p-3 md:p-4 rounded-xl border border-slate-600 shadow-inner">💰 골드: <span class="text-yellow-400">${state.player.gold} G</span></p>
                                 <p class="bg-slate-900/60 p-3 md:p-4 rounded-xl border border-slate-600 shadow-inner">🔮 수정구: <span class="text-pink-400">${state.player.inventory.crystal}개</span></p>
                             </div>
                         </div>
                     </div>
 
-                    <div class="flex flex-col sm:flex-row gap-4 md:gap-6 w-full mb-6 md:mb-8">
-                        <button onclick="openShop()" class="flex-1 bg-yellow-600 hover:bg-yellow-500 text-white font-bold py-4 md:py-6 rounded-2xl md:rounded-3xl shadow-xl border-b-[6px] md:border-b-8 border-yellow-800 active:border-b-0 active:mt-[6px] md:active:mt-2 transition-all text-xl md:text-2xl flex items-center justify-center gap-3 md:gap-4">🛒 상점 둘러보기</button>
-                        <button onclick="openBestiary()" class="flex-1 bg-purple-600 hover:bg-purple-500 text-white font-bold py-4 md:py-6 rounded-2xl md:rounded-3xl shadow-xl border-b-[6px] md:border-b-8 border-purple-800 active:border-b-0 active:mt-[6px] md:active:mt-2 transition-all text-xl md:text-2xl flex items-center justify-center gap-3 md:gap-4">📖 몬스터 도감</button>
-                        <button onclick="openAchievements()" class="flex-1 bg-pink-600 hover:bg-pink-500 text-white font-bold py-4 md:py-6 rounded-2xl md:rounded-3xl shadow-xl border-b-[6px] md:border-b-8 border-pink-800 active:border-b-0 active:mt-[6px] md:active:mt-2 transition-all text-xl md:text-2xl flex items-center justify-center gap-3 md:gap-4">🏅 업적 현황</button>
+                    <div class="flex flex-row gap-4 md:gap-6 w-full mb-6 md:mb-8">
+                        <button onclick="openShop()" class="flex-1 bg-yellow-600 hover:bg-yellow-500 text-white font-bold py-4 md:py-6 rounded-2xl md:rounded-3xl shadow-xl border-b-[6px] md:border-b-8 border-yellow-800 active:border-b-0 active:mt-[6px] md:active:mt-2 transition-all text-lg md:text-2xl flex items-center justify-center gap-2 md:gap-4">🛒 상점</button>
+                        <button onclick="openBestiary()" class="flex-1 bg-purple-600 hover:bg-purple-500 text-white font-bold py-4 md:py-6 rounded-2xl md:rounded-3xl shadow-xl border-b-[6px] md:border-b-8 border-purple-800 active:border-b-0 active:mt-[6px] md:active:mt-2 transition-all text-lg md:text-2xl flex items-center justify-center gap-2 md:gap-4">📖 도감</button>
+                        <button onclick="openAchievements()" class="flex-1 bg-pink-600 hover:bg-pink-500 text-white font-bold py-4 md:py-6 rounded-2xl md:rounded-3xl shadow-xl border-b-[6px] md:border-b-8 border-pink-800 active:border-b-0 active:mt-[6px] md:active:mt-2 transition-all text-lg md:text-2xl flex items-center justify-center gap-2 md:gap-4">🏅 업적</button>
                     </div>
                     
                     <button onclick="checkRegionStart()" class="w-full bg-blue-600 hover:bg-blue-500 text-white font-bold py-5 md:py-8 rounded-2xl md:rounded-3xl shadow-2xl border-b-[6px] md:border-b-8 border-blue-800 active:border-b-0 active:mt-[6px] md:active:mt-2 transition-all text-2xl md:text-4xl mb-6">다음 장소로 출발</button>
@@ -1242,23 +1286,23 @@ function render() {
                     let colorClass = nextUpgrade.level === 1 ? 'text-slate-200' : (nextUpgrade.level === 2 ? 'text-blue-300' : (nextUpgrade.level === 3 ? 'text-purple-300' : 'text-pink-400'));
                     
                     return `
-                    <div class="bg-slate-800/80 backdrop-blur-md p-4 md:p-6 rounded-2xl md:rounded-3xl border-2 md:border-4 ${canBuy ? 'border-slate-500 hover:-translate-y-1 transition-transform shadow-lg' : 'border-slate-600 opacity-60'} flex flex-col sm:flex-row justify-between items-center gap-4">
-                        <div class="flex-1 w-full text-center sm:text-left">
-                            <h3 class="text-xl md:text-2xl font-bold ${colorClass} mb-2 md:mb-3 drop-shadow">[Lv.${nextUpgrade.level}] ${nextUpgrade.name}</h3>
+                    <div class="bg-slate-800/80 backdrop-blur-md p-4 md:p-6 rounded-2xl md:rounded-3xl border-2 md:border-4 ${canBuy ? 'border-slate-500 hover:-translate-y-1 transition-transform shadow-lg' : 'border-slate-600 opacity-60'} flex flex-row justify-between items-center gap-4">
+                        <div class="flex-1 w-full text-left">
+                            <h3 class="text-xl md:text-2xl font-bold ${colorClass} mb-2 md:mb-3 drop-shadow break-keep">[Lv.${nextUpgrade.level}] ${nextUpgrade.name}</h3>
                             <p class="text-sm md:text-lg text-slate-300 leading-relaxed text-balance drop-shadow-sm">${nextUpgrade.desc} <span class="text-yellow-400 font-bold ml-1">(현재 Lv.${currentLv})</span></p>
                         </div>
-                        <button onclick="upgradeEquip('${type}')" ${!canBuy ? 'disabled' : ''} class="${canBuy ? 'bg-blue-600 hover:bg-blue-500 border-blue-800 shadow-xl' : 'bg-slate-700 cursor-not-allowed border-slate-800 text-slate-400'} text-lg md:text-2xl font-bold py-3 md:py-5 px-6 md:px-8 rounded-xl md:rounded-2xl border-b-4 md:border-b-8 active:border-b-0 active:mt-1 md:active:mt-2 transition-all shrink-0 focus:outline-none w-full sm:w-auto">
+                        <button onclick="upgradeEquip('${type}')" ${!canBuy ? 'disabled' : ''} class="${canBuy ? 'bg-blue-600 hover:bg-blue-500 border-blue-800 shadow-xl' : 'bg-slate-700 cursor-not-allowed border-slate-800 text-slate-400'} text-lg md:text-2xl font-bold py-3 md:py-5 px-4 md:px-8 rounded-xl md:rounded-2xl border-b-4 md:border-b-8 active:border-b-0 active:mt-1 md:active:mt-2 transition-all shrink-0 focus:outline-none w-auto">
                             ${btnStr}
                         </button>
                     </div>`;
                 } else {
                     return `
-                    <div class="bg-slate-800/50 backdrop-blur-md p-4 md:p-6 rounded-2xl md:rounded-3xl border-2 md:border-4 border-slate-600 opacity-80 flex flex-col sm:flex-row justify-between items-center gap-4">
-                        <div class="flex-1 w-full text-center sm:text-left">
+                    <div class="bg-slate-800/50 backdrop-blur-md p-4 md:p-6 rounded-2xl md:rounded-3xl border-2 md:border-4 border-slate-600 opacity-80 flex flex-row justify-between items-center gap-4">
+                        <div class="flex-1 w-full text-left">
                             <h3 class="text-xl md:text-2xl font-bold text-yellow-300 mb-2 md:mb-3 drop-shadow">${typeNames[type]} 마스터 달성!</h3>
                             <p class="text-sm md:text-lg text-slate-400 leading-relaxed text-balance drop-shadow-sm">최고 등급까지 업그레이드 완료 (Lv.${currentLv})</p>
                         </div>
-                        <button disabled class="bg-slate-700 cursor-not-allowed border-slate-800 text-yellow-500 text-lg md:text-2xl font-bold py-3 md:py-5 px-6 md:px-8 rounded-xl md:rounded-2xl border-b-4 md:border-b-8 shrink-0 focus:outline-none w-full sm:w-auto">MAX</button>
+                        <button disabled class="bg-slate-700 cursor-not-allowed border-slate-800 text-yellow-500 text-lg md:text-2xl font-bold py-3 md:py-5 px-4 md:px-8 rounded-xl md:rounded-2xl border-b-4 md:border-b-8 shrink-0 focus:outline-none w-auto">MAX</button>
                     </div>`;
                 }
             }).join('');
@@ -1267,12 +1311,12 @@ function render() {
                 const canBuy = state.player.gold >= item.price && !item.bought;
                 let btnStr = item.bought ? '품절' : `💰 ${item.price}`;
                 return `
-                <div class="bg-slate-800/80 backdrop-blur-md p-4 md:p-6 rounded-2xl md:rounded-3xl border-2 md:border-4 ${canBuy ? 'border-slate-500 hover:-translate-y-1 transition-transform shadow-lg' : 'border-slate-600 opacity-60'} flex flex-col sm:flex-row justify-between items-center gap-4">
-                    <div class="flex-1 w-full text-center sm:text-left">
-                        <h3 class="text-xl md:text-2xl font-bold ${item.bought ? 'line-through text-slate-400' : 'text-white'} mb-2 md:mb-3 drop-shadow">${item.name}</h3>
+                <div class="bg-slate-800/80 backdrop-blur-md p-4 md:p-6 rounded-2xl md:rounded-3xl border-2 md:border-4 ${canBuy ? 'border-slate-500 hover:-translate-y-1 transition-transform shadow-lg' : 'border-slate-600 opacity-60'} flex flex-row justify-between items-center gap-4">
+                    <div class="flex-1 w-full text-left">
+                        <h3 class="text-xl md:text-2xl font-bold ${item.bought ? 'line-through text-slate-400' : 'text-white'} mb-2 md:mb-3 drop-shadow break-keep">${item.name}</h3>
                         <p class="text-sm md:text-lg text-slate-300 leading-relaxed text-balance drop-shadow-sm">${item.desc}</p>
                     </div>
-                    <button onclick="buyItem('${item.id}', '${state.shopTab}')" ${!canBuy ? 'disabled' : ''} class="${canBuy ? 'bg-blue-600 hover:bg-blue-500 border-blue-800 shadow-xl' : 'bg-slate-700 cursor-not-allowed border-slate-800 text-slate-400'} text-lg md:text-2xl font-bold py-3 md:py-5 px-6 md:px-8 rounded-xl md:rounded-2xl border-b-4 md:border-b-8 active:border-b-0 active:mt-1 md:active:mt-2 transition-all shrink-0 focus:outline-none w-full sm:w-auto">
+                    <button onclick="buyItem('${item.id}', '${state.shopTab}')" ${!canBuy ? 'disabled' : ''} class="${canBuy ? 'bg-blue-600 hover:bg-blue-500 border-blue-800 shadow-xl' : 'bg-slate-700 cursor-not-allowed border-slate-800 text-slate-400'} text-lg md:text-2xl font-bold py-3 md:py-5 px-4 md:px-8 rounded-xl md:rounded-2xl border-b-4 md:border-b-8 active:border-b-0 active:mt-1 md:active:mt-2 transition-all shrink-0 focus:outline-none w-auto">
                         ${btnStr}
                     </button>
                 </div>`;
@@ -1283,9 +1327,9 @@ function render() {
             <div class="overflow-y-auto w-full h-full ${transitionClass} bg-cover bg-center relative" style="background-image: url('${bgImage}');">
                 <div class="absolute inset-0 bg-slate-900/80 z-0"></div>
                 <div class="z-10 relative flex flex-col min-h-full py-12 px-4 md:px-6 max-w-6xl mx-auto w-full">
-                    <div class="flex flex-col sm:flex-row justify-between items-center mb-6 md:mb-8 border-b-4 border-slate-700/50 pb-4 md:pb-6 mt-4 gap-4">
-                        <h2 class="text-5xl md:text-6xl text-yellow-400 title-font drop-shadow-md">상점 🛒</h2>
-                        <div class="text-2xl md:text-4xl font-bold text-yellow-300 bg-slate-900/80 backdrop-blur-sm px-6 md:px-8 py-3 md:py-4 rounded-2xl md:rounded-3xl flex items-center gap-3 md:gap-5 border-2 border-slate-600 shadow-inner">
+                    <div class="flex flex-row justify-between items-center mb-6 md:mb-8 border-b-4 border-slate-700/50 pb-4 md:pb-6 mt-4 gap-4">
+                        <h2 class="text-4xl md:text-6xl text-yellow-400 title-font drop-shadow-md">상점 🛒</h2>
+                        <div class="text-xl md:text-4xl font-bold text-yellow-300 bg-slate-900/80 backdrop-blur-sm px-4 md:px-8 py-2 md:py-4 rounded-2xl md:rounded-3xl flex items-center gap-3 md:gap-5 border-2 border-slate-600 shadow-inner">
                             <img src="./assets_hero/${state.player.cls.imgPrefix}_idle.png" class="border-2 md:border-4 border-slate-500 rounded-xl md:rounded-2xl bg-white shadow-md object-contain w-[40px] h-[40px] md:w-[60px] md:h-[60px]" style="image-rendering: pixelated;" alt="Player">
                             💰 <span id="shop-gold">${state.player.gold}</span>
                         </div>
@@ -1293,7 +1337,7 @@ function render() {
 
                     <div class="flex gap-2 md:gap-4 mb-0 z-10 relative">
                         ${tabs.map(t => `
-                            <button onclick="changeShopTab('${t.id}')" class="flex-1 py-3 md:py-5 text-sm sm:text-lg md:text-2xl font-bold rounded-t-xl md:rounded-t-3xl border-t-2 md:border-t-4 border-x-2 md:border-x-4 transition-all focus:outline-none backdrop-blur-md ${state.shopTab === t.id ? 'tab-active shadow-xl z-20 border-b-0' : 'tab-inactive border-b-2 md:border-b-4 hover:bg-slate-700'}">
+                            <button onclick="changeShopTab('${t.id}')" class="flex-1 py-3 md:py-5 text-base md:text-2xl font-bold rounded-t-xl md:rounded-t-3xl border-t-2 md:border-t-4 border-x-2 md:border-x-4 transition-all focus:outline-none backdrop-blur-md ${state.shopTab === t.id ? 'tab-active shadow-xl z-20 border-b-0' : 'tab-inactive border-b-2 md:border-b-4 hover:bg-slate-700'}">
                                 ${t.name}
                             </button>
                         `).join('')}
@@ -1317,21 +1361,21 @@ function render() {
             const unlocked = state.bestiary[m.id];
             if (unlocked) {
                 return `
-                <div class="bg-slate-800/80 backdrop-blur-md p-4 md:p-6 rounded-2xl md:rounded-3xl border-2 md:border-4 border-slate-500 flex flex-col sm:flex-row gap-4 md:gap-6 shadow-xl mb-4 md:mb-6 items-center sm:items-start text-center sm:text-left hover:-translate-y-1 transition-transform">
+                <div class="bg-slate-800/80 backdrop-blur-md p-4 md:p-6 rounded-2xl md:rounded-3xl border-2 md:border-4 border-slate-500 flex flex-row gap-4 md:gap-6 shadow-xl mb-4 md:mb-6 items-center hover:-translate-y-1 transition-transform">
                     <div class="text-[60px] md:text-[80px] drop-shadow-xl shrink-0">${m.icon}</div>
-                    <div class="flex-1 w-full">
+                    <div class="flex-1 w-full text-left">
                         <h3 class="text-2xl md:text-3xl font-bold text-white mb-2 drop-shadow">${m.name}</h3>
-                        <p class="text-sm md:text-lg font-bold text-yellow-300 mb-2 md:mb-3 bg-slate-900/60 inline-block px-3 py-1.5 md:px-4 md:py-2 rounded-xl shadow-inner">주요 기술: ${m.fav}</p>
-                        <p class="text-base md:text-xl text-slate-200 leading-relaxed text-balance drop-shadow-sm">${m.desc}</p>
+                        <p class="text-xs md:text-lg font-bold text-yellow-300 mb-2 md:mb-3 bg-slate-900/60 inline-block px-3 py-1.5 md:px-4 md:py-2 rounded-xl shadow-inner">주요 기술: ${m.fav}</p>
+                        <p class="text-sm md:text-xl text-slate-200 leading-relaxed text-balance drop-shadow-sm">${m.desc}</p>
                     </div>
                 </div>`;
             } else {
                 return `
-                <div class="bg-slate-900/80 backdrop-blur-md p-4 md:p-6 rounded-2xl md:rounded-3xl border-2 md:border-4 border-slate-700 flex flex-col sm:flex-row gap-4 md:gap-6 shadow-lg mb-4 md:mb-6 items-center sm:items-start text-center sm:text-left opacity-50">
+                <div class="bg-slate-900/80 backdrop-blur-md p-4 md:p-6 rounded-2xl md:rounded-3xl border-2 md:border-4 border-slate-700 flex flex-row gap-4 md:gap-6 shadow-lg mb-4 md:mb-6 items-center opacity-50 text-left">
                     <div class="text-[60px] md:text-[80px] grayscale shrink-0">❓</div>
                     <div class="w-full">
                         <h3 class="text-2xl md:text-3xl font-bold text-slate-500 mb-2">알 수 없는 몬스터</h3>
-                        <p class="text-base md:text-xl text-slate-600 mt-2">아직 조우하지 않았습니다.</p>
+                        <p class="text-sm md:text-xl text-slate-600 mt-2">아직 조우하지 않았습니다.</p>
                     </div>
                 </div>`;
             }
@@ -1341,8 +1385,8 @@ function render() {
             <div class="overflow-y-auto w-full h-full ${transitionClass} bg-cover bg-center relative" style="background-image: url('${bgImage}');">
                 <div class="absolute inset-0 bg-slate-900/80 z-0"></div>
                 <div class="z-10 relative flex flex-col min-h-full py-12 px-4 md:px-6 max-w-6xl mx-auto w-full">
-                    <h2 class="text-5xl md:text-6xl text-purple-400 title-font mb-8 md:mb-10 mt-4 text-center drop-shadow-md">📖 전체 몬스터 도감</h2>
-                    <div class="flex-1 grid grid-cols-1 md:grid-cols-2 gap-x-4 gap-y-2 md:gap-x-8 pb-6">
+                    <h2 class="text-4xl md:text-6xl text-purple-400 title-font mb-8 md:mb-10 mt-4 text-center drop-shadow-md">📖 전체 몬스터 도감</h2>
+                    <div class="flex-1 grid grid-cols-2 gap-x-4 gap-y-2 md:gap-x-8 pb-6">
                         ${listHtml}
                     </div>
                     <button onclick="closeOverlay()" class="bg-slate-700 hover:bg-slate-600 text-white font-bold py-4 md:py-6 px-8 md:px-10 rounded-2xl md:rounded-3xl shadow-xl border-b-[6px] md:border-b-8 border-slate-800 active:border-b-0 active:mt-[6px] md:active:mt-2 transition-all w-full text-2xl md:text-4xl mb-6">닫기</button>
@@ -1354,13 +1398,13 @@ function render() {
         const achHtml = ACHIEVEMENTS_LIST.map(a => {
             const unlocked = state.achievements[a.id];
             return `
-            <div class="bg-slate-800/80 backdrop-blur-md p-4 md:p-6 rounded-2xl md:rounded-3xl border-2 md:border-4 ${unlocked ? 'border-yellow-500 shadow-yellow-500/20' : 'border-slate-600 opacity-50'} flex flex-col sm:flex-row gap-4 md:gap-6 shadow-xl mb-4 md:mb-6 items-center text-center sm:text-left transition-all">
+            <div class="bg-slate-800/80 backdrop-blur-md p-4 md:p-6 rounded-2xl md:rounded-3xl border-2 md:border-4 ${unlocked ? 'border-yellow-500 shadow-yellow-500/20' : 'border-slate-600 opacity-50'} flex flex-row gap-4 md:gap-6 shadow-xl mb-4 md:mb-6 items-center text-left transition-all">
                 <div class="text-[50px] md:text-[60px] drop-shadow-xl shrink-0 ${unlocked ? '' : 'grayscale'}">${unlocked ? '🏅' : '🔒'}</div>
                 <div class="flex-1 w-full">
-                    <h3 class="text-2xl md:text-3xl font-bold ${unlocked ? 'text-yellow-400' : 'text-slate-400'} mb-2 drop-shadow">${a.name}</h3>
-                    <p class="text-base md:text-xl text-slate-300 leading-relaxed text-balance drop-shadow-sm">${a.desc}</p>
+                    <h3 class="text-xl md:text-3xl font-bold ${unlocked ? 'text-yellow-400' : 'text-slate-400'} mb-2 drop-shadow break-keep">${a.name}</h3>
+                    <p class="text-sm md:text-xl text-slate-300 leading-relaxed text-balance drop-shadow-sm">${a.desc}</p>
                 </div>
-                <div class="text-xl md:text-2xl font-bold ${unlocked ? 'text-green-400' : 'text-slate-500'} sm:pr-4">
+                <div class="text-lg md:text-2xl font-bold ${unlocked ? 'text-green-400' : 'text-slate-500'} pr-2 md:pr-4 shrink-0">
                     ${unlocked ? '달성!' : '미달성'}
                 </div>
             </div>`;
@@ -1370,8 +1414,8 @@ function render() {
             <div class="overflow-y-auto w-full h-full ${transitionClass} bg-cover bg-center relative" style="background-image: url('${bgImage}');">
                 <div class="absolute inset-0 bg-slate-900/80 z-0"></div>
                 <div class="z-10 relative flex flex-col min-h-full py-12 px-4 md:px-6 max-w-6xl mx-auto w-full">
-                    <h2 class="text-5xl md:text-6xl text-pink-400 title-font mb-8 md:mb-10 mt-4 text-center drop-shadow-md">🏅 업적 현황</h2>
-                    <div class="flex-1 pb-6">
+                    <h2 class="text-4xl md:text-6xl text-pink-400 title-font mb-8 md:mb-10 mt-4 text-center drop-shadow-md">🏅 업적 현황</h2>
+                    <div class="flex-1 grid grid-cols-1 md:grid-cols-2 gap-x-4 gap-y-2 md:gap-x-8 pb-6">
                         ${achHtml}
                     </div>
                     <button onclick="closeOverlay()" class="bg-slate-700 hover:bg-slate-600 text-white font-bold py-4 md:py-6 px-8 md:px-10 rounded-2xl md:rounded-3xl shadow-xl border-b-[6px] md:border-b-8 border-slate-800 active:border-b-0 active:mt-[6px] md:active:mt-2 transition-all w-full text-2xl md:text-4xl mb-6">닫기</button>
@@ -1388,9 +1432,9 @@ function render() {
                     <h2 class="text-[60px] md:text-[80px] font-bold text-red-400 mb-6 md:mb-8 title-font drop-shadow-lg text-center">게임 오버</h2>
                     <p class="text-2xl md:text-4xl text-yellow-300 font-bold mb-10 md:mb-14 bg-slate-900/80 px-8 md:px-10 py-4 md:py-5 rounded-3xl border-4 border-red-500 shadow-2xl text-center">최종 도달: STAGE ${state.stage + 1}</p>
                     
-                    <div class="flex flex-col md:flex-row gap-4 md:gap-6 w-full max-w-sm md:max-w-4xl justify-center">
-                        ${!state.rouletteUsed ? `<button onclick="useRoulette()" class="w-full md:flex-1 bg-pink-600 hover:bg-pink-500 text-white font-bold py-5 md:py-8 px-6 md:px-10 rounded-3xl shadow-2xl border-b-[6px] md:border-b-8 border-pink-900 active:border-b-0 active:mt-[6px] md:active:mt-2 transition-all text-3xl md:text-4xl leading-tight">✨ 운명의 룰렛<br><span class="text-lg md:text-xl">(선생님 찬스!)</span></button>` : ''}
-                        <button onclick="restartGame()" class="w-full md:flex-1 bg-slate-800 hover:bg-slate-700 text-white font-bold py-5 md:py-8 px-6 md:px-10 rounded-3xl shadow-2xl border-b-[6px] md:border-b-8 border-slate-900 active:border-b-0 active:mt-[6px] md:active:mt-2 transition-all text-2xl md:text-4xl flex items-center justify-center">처음부터 다시</button>
+                    <div class="flex flex-row gap-4 md:gap-6 w-full max-w-sm md:max-w-4xl justify-center">
+                        ${!state.rouletteUsed ? `<button onclick="useRoulette()" class="flex-1 bg-pink-600 hover:bg-pink-500 text-white font-bold py-5 md:py-8 px-4 md:px-10 rounded-2xl md:rounded-3xl shadow-2xl border-b-[6px] md:border-b-8 border-pink-900 active:border-b-0 active:mt-[6px] md:active:mt-2 transition-all text-2xl md:text-4xl leading-tight">✨ 운명의 룰렛<br><span class="text-sm md:text-xl">(선생님 찬스!)</span></button>` : ''}
+                        <button onclick="restartGame()" class="flex-1 bg-slate-800 hover:bg-slate-700 text-white font-bold py-5 md:py-8 px-4 md:px-10 rounded-2xl md:rounded-3xl shadow-2xl border-b-[6px] md:border-b-8 border-slate-900 active:border-b-0 active:mt-[6px] md:active:mt-2 transition-all text-2xl md:text-4xl flex items-center justify-center">처음부터 다시</button>
                     </div>
                 </div>
             </div>
@@ -1409,7 +1453,7 @@ function render() {
                     <div class="bg-slate-800/80 backdrop-blur-md rounded-[2rem] p-6 md:p-10 w-full mb-8 md:mb-12 text-left border-2 md:border-4 border-slate-600 shadow-2xl flex flex-col sm:flex-row items-center justify-between gap-6">
                         <div class="text-center sm:text-left w-full sm:w-auto">
                             <h3 class="text-3xl md:text-4xl text-yellow-300 font-bold mb-4 md:mb-6 drop-shadow">나의 모험 기록</h3>
-                            <div class="flex flex-col sm:flex-row gap-4 md:gap-6 items-center mb-4 md:mb-6">
+                            <div class="flex flex-row gap-4 md:gap-6 items-center justify-center sm:justify-start mb-4 md:mb-6">
                                 <img src="./assets_hero/${state.player.cls.imgPrefix}_idle.png" class="border-4 border-slate-500 rounded-3xl shrink-0 bg-white shadow-xl object-contain w-[120px] h-[120px] md:w-[160px] md:h-[160px]" style="image-rendering: pixelated;" alt="Player">
                                 <p class="text-green-300 font-bold text-3xl md:text-4xl drop-shadow">최종 레벨<br class="sm:hidden"> Lv.${state.player.level} ${state.player.cls.name}</p>
                             </div>
@@ -1421,12 +1465,12 @@ function render() {
                         </div>
                     </div>
                     
-                    <div class="flex flex-col sm:flex-row gap-4 md:gap-8 w-full mb-6">
-                        <div class="flex gap-4 w-full">
+                    <div class="flex flex-row gap-4 md:gap-8 w-full mb-6">
+                        <div class="flex flex-col md:flex-row gap-4 w-full md:flex-[1.5]">
                             <button onclick="openAchievements()" class="flex-1 bg-pink-600 hover:bg-pink-500 text-white font-bold py-4 md:py-8 px-4 md:px-10 rounded-2xl md:rounded-3xl shadow-2xl border-b-[6px] md:border-b-8 border-pink-800 active:border-b-0 active:mt-[6px] md:active:mt-2 transition-all text-xl md:text-3xl flex items-center justify-center">🏅 업적</button>
                             <button onclick="openBestiary()" class="flex-1 bg-purple-600 hover:bg-purple-500 text-white font-bold py-4 md:py-8 px-4 md:px-10 rounded-2xl md:rounded-3xl shadow-2xl border-b-[6px] md:border-b-8 border-purple-800 active:border-b-0 active:mt-[6px] md:active:mt-2 transition-all text-xl md:text-3xl flex items-center justify-center">📖 도감</button>
                         </div>
-                        <button onclick="restartGame()" class="w-full sm:flex-[2] bg-blue-600 hover:bg-blue-500 text-white font-bold py-4 md:py-8 px-4 md:px-10 rounded-2xl md:rounded-3xl shadow-2xl border-b-[6px] md:border-b-8 border-blue-800 active:border-b-0 active:mt-[6px] md:active:mt-2 transition-all text-2xl md:text-4xl">새 모험 시작</button>
+                        <button onclick="restartGame()" class="w-full md:flex-[2] bg-blue-600 hover:bg-blue-500 text-white font-bold py-4 md:py-8 px-4 md:px-10 rounded-2xl md:rounded-3xl shadow-2xl border-b-[6px] md:border-b-8 border-blue-800 active:border-b-0 active:mt-[6px] md:active:mt-2 transition-all text-2xl md:text-4xl">새 모험 시작</button>
                     </div>
                 </div>
             </div>
