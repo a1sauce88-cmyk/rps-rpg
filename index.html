@@ -27,6 +27,9 @@
             display: flex;
             align-items: center;
             justify-content: center;
+            -webkit-font-smoothing: antialiased;
+            -moz-osx-font-smoothing: grayscale;
+            text-rendering: optimizeLegibility;
         }
 
         h1, h2, h3, .title-font { font-family: 'Jua', sans-serif; }
@@ -92,9 +95,9 @@
 
         /*
            반응형 핵심 구조
-           - 게임 내부 UI는 기존 1280x720 좌표계를 유지합니다.
-           - 화면에 보이는 크기만 JS scale로 확대/축소합니다.
-           - 기존 코드의 scale 최대값 1 제한을 제거하여 PC에서도 크게 보이게 했습니다.
+           - transform: scale()로 전체 화면을 줄이면 텍스트가 이미지처럼 리샘플링되어 흐려질 수 있습니다.
+           - 그래서 컨테이너는 flex로 중앙 정렬하고, 화면 맞춤은 CSS zoom을 우선 사용합니다.
+           - zoom은 크기만 조정하고 텍스트 렌더링이 transform scale보다 선명하게 유지됩니다.
         */
         #main-wrapper {
             width: 100vw;
@@ -103,30 +106,36 @@
             position: relative;
             overflow: hidden;
             background: #000;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            place-items: center;
         }
 
         #game-container {
-            position: absolute;
-            top: 50%;
-            left: 50%;
+            position: relative;
             width: 1280px;
             height: 720px;
             background-color: #0f172a;
+            transform: none;
             transform-origin: center center;
             overflow: hidden;
             box-shadow: 0 0 50px rgba(0,0,0,1);
-            will-change: transform;
+            flex-shrink: 0;
+            backface-visibility: hidden;
+            -webkit-font-smoothing: antialiased;
+            text-rendering: optimizeLegibility;
         }
 
         /* 모바일 세로 모드도 지원합니다. 기존 회전 안내는 숨기고 게임 화면을 유지합니다. */
         @media screen and (orientation: portrait) {
             #portrait-warning { display: none !important; }
-            #main-wrapper { display: block !important; }
+            #main-wrapper { display: flex !important; align-items: center !important; justify-content: center !important; }
         }
 
         @media screen and (orientation: landscape) {
             #portrait-warning { display: none !important; }
-            #main-wrapper { display: block !important; }
+            #main-wrapper { display: flex !important; align-items: center !important; justify-content: center !important; }
         }
     </style>
 </head>
@@ -184,18 +193,38 @@ function adjustScale() {
     const safeH = Math.max(1, winH);
     const mobilePortrait = isMobilePortraitMode();
 
-    // 모바일 세로에서는 720x1280 세로 캔버스를 사용하고,
-    // PC/태블릿 가로에서는 기존 1280x720 캔버스를 유지합니다.
+    // 모바일 세로에서는 720x1280 세로 캔버스,
+    // PC/태블릿 가로에서는 1280x720 가로 캔버스를 유지합니다.
     const baseW = mobilePortrait ? 720 : BASE_WIDTH;
     const baseH = mobilePortrait ? 1280 : BASE_HEIGHT;
 
     container.style.width = `${baseW}px`;
     container.style.height = `${baseH}px`;
+    container.style.transform = 'none';
+    container.style.left = 'auto';
+    container.style.top = 'auto';
+    container.style.position = 'relative';
     document.body.classList.toggle('mobile-portrait', mobilePortrait);
-    if (wrapper) wrapper.style.overflow = 'hidden';
 
-    const scale = Math.min(safeW / baseW, safeH / baseH) * 0.995;
-    container.style.transform = `translate(-50%, -50%) scale(${scale})`;
+    if (wrapper) {
+        wrapper.style.overflow = 'hidden';
+        wrapper.style.display = 'flex';
+        wrapper.style.alignItems = 'center';
+        wrapper.style.justifyContent = 'center';
+        wrapper.style.placeItems = 'center';
+    }
+
+    const fit = Math.min(safeW / baseW, safeH / baseH) * 0.995;
+
+    // 핵심 수정: transform: scale() 대신 zoom 사용.
+    // 텍스트가 0.2초 뒤 흐려지는 현상을 크게 줄입니다.
+    container.style.zoom = fit;
+
+    // 일부 브라우저에서 zoom을 무시할 때만 최소 fallback을 사용합니다.
+    // 일반 PC Chrome/Edge, 모바일 Chrome/Safari에서는 zoom이 우선 적용됩니다.
+    if (container.style.zoom === '') {
+        container.style.transform = `scale(${fit})`;
+    }
 }
 
 let lastPortraitLayoutMode = null;
@@ -225,28 +254,66 @@ const AudioEngine = {
     muted: true, 
     currentTrack: '', 
     bgmAudio: new Audio(),
-    
-    init() {
-        if(!this.ctx) {
-            this.ctx = new (window.AudioContext || window.webkitAudioContext)();
-            this.muted = false; 
-            this.bgmAudio.loop = true; 
-            this.playBGM('title');
-        } else if (this.ctx.state === 'suspended') {
-            this.ctx.resume();
+    unlocked: false,
+
+    init(forceUnmute = true) {
+        try {
+            if (!this.ctx) {
+                this.ctx = new (window.AudioContext || window.webkitAudioContext)();
+                this.bgmAudio.loop = true;
+                this.bgmAudio.volume = 0.35;
+                this.unlocked = true;
+            }
+
+            if (forceUnmute) this.muted = false;
+
+            if (this.ctx && this.ctx.state === 'suspended') {
+                this.ctx.resume().catch(e => console.warn('AudioContext resume blocked:', e));
+            }
+
+            if (!this.currentTrack) {
+                this.playBGM('title');
+            } else if (!this.muted) {
+                this.bgmAudio.play().catch(e => console.warn('Audio play blocked:', e));
+            }
+        } catch (e) {
+            console.warn('Audio init failed:', e);
         }
     },
+
+    ensureReady() {
+        if (!this.ctx) this.init(true);
+        if (this.ctx && this.ctx.state === 'suspended') {
+            this.ctx.resume().catch(e => console.warn('AudioContext resume blocked:', e));
+        }
+    },
+
     toggle() {
+        if (!this.ctx) {
+            this.init(false);
+        } else if (this.ctx.state === 'suspended') {
+            this.ctx.resume().catch(e => console.warn('AudioContext resume blocked:', e));
+        }
+
         this.muted = !this.muted;
-        if(this.muted) {
+
+        if (this.muted) {
             this.bgmAudio.pause();
         } else {
-            if (this.currentTrack) this.bgmAudio.play().catch(e => console.warn("Audio play blocked:", e));
+            if (!this.currentTrack) this.playBGM('title');
+            else this.bgmAudio.play().catch(e => console.warn('Audio play blocked:', e));
+            this.playTone(700, 'sine', 0.08, 0.08);
         }
         render();
     },
+
     playBGM(trackName) {
-        if (this.currentTrack === trackName) return; 
+        const previousTrack = this.currentTrack;
+        if (previousTrack === trackName && this.bgmAudio.src) {
+            if (!this.muted) this.bgmAudio.play().catch(e => console.warn('Audio play blocked:', e));
+            return;
+        }
+
         this.currentTrack = trackName;
         
         let src = '';
@@ -259,32 +326,57 @@ const AudioEngine = {
             case 'stage5': src = './assets_audio/bgm_stage5.mp3'; break;
             case 'ending': src = './assets_audio/bgm_end.mp3'; break;
         }
-        
+
         this.bgmAudio.src = src;
-        if (!this.muted) this.bgmAudio.play().catch(e => console.warn("Audio play blocked:", e));
+        this.bgmAudio.volume = 0.35;
+        if (!this.muted) this.bgmAudio.play().catch(e => console.warn('Audio play blocked:', e));
     },
-    playTone(freq, type, duration, vol=0.1) {
-        if(!this.ctx || this.muted) return;
-        const osc = this.ctx.createOscillator(); 
-        const gain = this.ctx.createGain();
-        osc.type = type; 
-        osc.frequency.setValueAtTime(freq, this.ctx.currentTime);
-        gain.gain.setValueAtTime(vol, this.ctx.currentTime);
-        gain.gain.exponentialRampToValueAtTime(0.01, this.ctx.currentTime + duration);
-        osc.connect(gain); 
-        gain.connect(this.ctx.destination);
-        osc.start(); 
-        osc.stop(this.ctx.currentTime + duration);
+
+    playTone(freq, type, duration, vol=0.18) {
+        if (this.muted) return;
+        if (!this.ctx) this.init(true);
+        if (!this.ctx) return;
+
+        if (this.ctx.state === 'suspended') {
+            this.ctx.resume()
+                .then(() => this.playTone(freq, type, duration, vol))
+                .catch(e => console.warn('AudioContext resume blocked:', e));
+            return;
+        }
+
+        try {
+            const osc = this.ctx.createOscillator(); 
+            const gain = this.ctx.createGain();
+            osc.type = type; 
+            osc.frequency.setValueAtTime(freq, this.ctx.currentTime);
+            gain.gain.setValueAtTime(vol, this.ctx.currentTime);
+            gain.gain.exponentialRampToValueAtTime(0.001, this.ctx.currentTime + duration);
+            osc.connect(gain); 
+            gain.connect(this.ctx.destination);
+            osc.start(); 
+            osc.stop(this.ctx.currentTime + duration);
+        } catch (e) {
+            console.warn('SFX play failed:', e);
+        }
     },
+
     sfx: {
-        hit() { AudioEngine.playTone(150, 'sawtooth', 0.2, 0.15); },
-        heal() { AudioEngine.playTone(600, 'sine', 0.2, 0.1); setTimeout(()=>AudioEngine.playTone(800, 'sine', 0.3, 0.1), 100); },
-        coin() { AudioEngine.playTone(1200, 'square', 0.1, 0.05); setTimeout(()=>AudioEngine.playTone(1600, 'square', 0.2, 0.05), 100); },
-        win() { [400, 500, 600, 800].forEach((f,i)=>setTimeout(()=>AudioEngine.playTone(f, 'square', 0.2, 0.1), i*150)); },
-        lose() { [300, 250, 200, 150].forEach((f,i)=>setTimeout(()=>AudioEngine.playTone(f, 'sawtooth', 0.3, 0.15), i*200)); },
-        select() { AudioEngine.playTone(400, 'sine', 0.1, 0.05); }
+        hit() { AudioEngine.playTone(150, 'sawtooth', 0.2, 0.22); },
+        heal() { AudioEngine.playTone(600, 'sine', 0.2, 0.16); setTimeout(()=>AudioEngine.playTone(800, 'sine', 0.3, 0.16), 100); },
+        coin() { AudioEngine.playTone(1200, 'square', 0.1, 0.12); setTimeout(()=>AudioEngine.playTone(1600, 'square', 0.2, 0.12), 100); },
+        win() { [400, 500, 600, 800].forEach((f,i)=>setTimeout(()=>AudioEngine.playTone(f, 'square', 0.2, 0.16), i*150)); },
+        lose() { [300, 250, 200, 150].forEach((f,i)=>setTimeout(()=>AudioEngine.playTone(f, 'sawtooth', 0.3, 0.22), i*200)); },
+        select() { AudioEngine.playTone(500, 'sine', 0.12, 0.14); }
     }
 };
+
+// PC/모바일 브라우저의 자동재생 제한 때문에 첫 입력에서 오디오를 확실히 깨웁니다.
+['pointerdown', 'keydown'].forEach(evt => {
+    window.addEventListener(evt, () => {
+        if (!AudioEngine.ctx) AudioEngine.init(true);
+        else if (AudioEngine.ctx.state === 'suspended') AudioEngine.ctx.resume().catch(() => {});
+    }, { once: true, passive: true });
+});
 
 // --- 3. 데이터 정의 ---
 const MOVES = { 
@@ -398,23 +490,23 @@ const MONSTERS = [
     { id: 'm1', name: '바위 골렘', hp: 30, atk: 4, exp: 20, goldReward: 20, icon: '🗿', pattern: 'boss_golem', fav: '✊ 방패 강타', dialogue: '"부순다."', hints: { rock: '육중한 기운을 모아 단단하게 뭉칩니다.', paper: '양팔을 좌우로 넓게 벌리며 빈틈을 보입니다.', scissors: '팔의 모서리를 예리한 각도로 세웁니다.' } },
     { id: 'm2', name: '조약돌 두더지', hp: 40, atk: 5, exp: 25, goldReward: 25, icon: '🐹', pattern: 'heavy_rock', fav: '✊ 방패 강타', dialogue: '"단단한 것만 믿는다!"', hints: { rock: '몸의 중심을 낮추고 둥글게 힘을 응축시킵니다.', paper: '긴장을 풀고 주변의 공기를 넓게 가릅니다.', scissors: '어둠 속에서 서늘하고 뾰족한 기운이 스칩니다.' } },
     { id: 'm3', name: '가위 벌레', hp: 45, atk: 6, exp: 30, goldReward: 25, icon: '🐛', pattern: 'heavy_scissors', fav: '✌️ 쌍검 베기', dialogue: '"싹둑싹둑!"', hints: { rock: '스스로를 빈틈없는 둥근 형태로 말아냅니다.', paper: '더듬이를 유연하게 사방으로 뻗어냅니다.', scissors: '날카로운 두 갈래의 끝부분이 교차하며 마찰음을 냅니다.' } },
-    { id: 'm5', name: '거대 풀잎 슬라임 (보스)', hp: 100, atk: 10, exp: 60, goldReward: 80, icon: '🌱', pattern: 'random', fav: '무작위', dialogue: '"거대한 말캉..."', hints: { rock: '알 수 없는 기운이 요동칩니다.', paper: '알 수 없는 기운이 요동칩니다.', scissors: '알 수 없는 기운이 요동칩니다.' } },
+    { id: 'm5', name: '거대 풀잎 슬라임 (보스)', hp: 100, atk: 10, exp: 60, goldReward: 80, icon: '🌱', pattern: 'random', fav: '무작위', dialogue: '"거대한 말캉..."', hints: { rock: ['침묵하는 거인은 제자리를 지키며 변화를 거부한다.', '말캉한 몸이 낮게 가라앉으며 묵직하게 굳어갑니다.', '움직임은 적지만 단단한 압박감이 밀려옵니다.'], paper: ['가장 넓은 품으로 세상을 덮어버리는 부드러운 정복자.', '몸이 넓게 퍼지며 주변을 감싸려 합니다.', '말랑한 표면이 사방으로 부드럽게 늘어납니다.'], scissors: ['둘이 되어야만 비로소 하나를 끊어낼 수 있는 운명.', '끝부분이 갈라지며 날카로운 선을 만듭니다.', '얇고 예리한 기운이 슬라임 표면을 가릅니다.'] } },
     { id: 'm6', name: '패턴 늑대', hp: 70, atk: 9, exp: 40, goldReward: 35, icon: '🐺', pattern: 'random', fav: '무작위', dialogue: '"크르릉..."', hints: { rock: '근육을 팽팽하게 수축시키며 무게중심을 낮춥니다.', paper: '가벼운 스텝을 밟으며 활동 반경을 크게 넓힙니다.', scissors: '목줄기를 노리는 듯한 뾰족한 살기가 느껴집니다.' } },
     { id: 'm7', name: '강철 두더지', hp: 85, atk: 11, exp: 50, goldReward: 40, icon: '🐾', pattern: 'heavy_rock', fav: '✊ 방패 강타', dialogue: '"절대 뚫리지 않아!"', hints: { rock: '무엇도 뚫지 못할 견고한 장벽을 형성합니다.', paper: '경계 태세를 허물고 양팔을 길게 늘어뜨립니다.', scissors: '번뜩이는 쇳소리와 함께 예리한 궤적을 그립니다.' } },
     { id: 'm9', name: '쌍검 암살자', hp: 80, atk: 15, exp: 60, goldReward: 50, icon: '⚔️', pattern: 'heavy_scissors', fav: '✌️ 쌍검 베기', dialogue: '"눈보다 빠르지."', hints: { rock: '몸을 한껏 움츠려 모든 충격에 대비하는 자세를 취합니다.', paper: '발소리를 죽인 채 사방으로 그림자를 넓힙니다.', scissors: '차갑고 뾰족한 살기가 정면을 향해 두 갈래로 뻗어옵니다.' } },
-    { id: 'm10', name: '타락한 검사 (보스)', hp: 150, atk: 16, exp: 100, goldReward: 120, icon: '🦇', pattern: 'boss_swordsman', fav: '✌️ 쌍검 베기', dialogue: '"어설픈 마법은 찢길 뿐이다!"', hints: { rock: '움직임을 최소화하고 묵직한 기운을 갈무리합니다.', paper: '어두운 기운을 사방으로 흩날리며 빈틈을 유도합니다.', scissors: '공기를 찢는 듯한 서늘한 궤적이 번뜩입니다.' } },
+    { id: 'm10', name: '타락한 검사 (보스)', hp: 150, atk: 16, exp: 100, goldReward: 120, icon: '🦇', pattern: 'boss_swordsman', fav: '✌️ 쌍검 베기', dialogue: '"어설픈 마법은 찢길 뿐이다!"', hints: { rock: ['움직임을 최소화하고 묵직한 기운을 갈무리합니다.', '검을 낮게 내리고 방어 자세를 굳힙니다.', '발을 단단히 고정한 채 충격에 대비합니다.'], paper: ['어두운 기운을 사방으로 흩날리며 빈틈을 유도합니다.', '망토가 넓게 퍼지며 시야를 흐립니다.', '검은 기운이 주변을 감싸며 공간을 넓힙니다.'], scissors: ['공기를 찢는 듯한 서늘한 궤적이 번뜩입니다.', '양손의 검끝이 날카롭게 교차합니다.', '짧고 빠른 베기 자세로 몸이 기울어집니다.'] } },
     { id: 'm4', name: '종이 유령', hp: 90, atk: 12, exp: 55, goldReward: 45, icon: '👻', pattern: 'heavy_paper', fav: '✋ 마법 장막', dialogue: '"감싸주마..."', hints: { rock: '흐릿한 형체가 한 점으로 단단하게 응축됩니다.', paper: '자신의 영역을 무한히 넓히며 주변을 집어삼킬 듯 굽어봅니다.', scissors: '흐늘거리던 끝부분이 순간적으로 창끝처럼 벼려집니다.' } },
     { id: 'm8', name: '마법의 책', hp: 110, atk: 14, exp: 65, goldReward: 55, icon: '📘', pattern: 'heavy_paper', fav: '✋ 마법 장막', dialogue: '"지식이 너를 삼킬 것이다."', hints: { rock: '모든 지식을 굳게 잠그고 어떠한 간섭도 거부합니다.', paper: '수많은 갈래로 쪼개진 지식들이 유연하게 허공을 춤춥니다.', scissors: '빳빳하게 굳어진 모서리가 예리하게 날을 세웁니다.' } },
     { id: 'm11', name: '불타는 슬라임', hp: 130, atk: 15, exp: 70, goldReward: 65, icon: '🔥', pattern: 'random', fav: '무작위', dialogue: '"다 태워버릴거야!"', hints: { rock: '뜨거운 기운이 폭발하기 직전처럼 둥글게 뭉쳐집니다.', paper: '맹렬한 화염이 사방으로 통제할 수 없이 번져나갑니다.', scissors: '가장 뜨거운 끝부분이 바늘처럼 뾰족하게 쏘아집니다.' } },
-    { id: 'm14', name: '거울 정령 (보스)', hp: 180, atk: 18, exp: 120, goldReward: 130, icon: '🔮', pattern: 'counter', fav: '카운터', dialogue: '"네 습관은 거울에 비쳤다."', hints: { rock: '표면이 불투명해지며 모든 충격을 흡수할 태세를 갖춥니다.', paper: '경계가 허물어지며 끝없이 넓은 공간을 투영합니다.', scissors: '날카로운 조각들이 허공에 떠올라 예리한 빛을 반사합니다.' } },
+    { id: 'm14', name: '거울 정령 (보스)', hp: 180, atk: 18, exp: 120, goldReward: 130, icon: '🔮', pattern: 'counter', fav: '카운터', dialogue: '"네 습관은 거울에 비쳤다."', hints: { rock: ['표면이 불투명해지며 모든 충격을 흡수할 태세를 갖춥니다.', '거울빛이 둥글게 뭉치며 단단해집니다.', '반짝임이 사라지고 묵직한 벽처럼 굳어갑니다.'], paper: ['경계가 허물어지며 끝없이 넓은 공간을 투영합니다.', '거울 속 풍경이 넓게 퍼지며 주변을 덮습니다.', '빛이 부드럽게 번지며 넓은 장막을 만듭니다.'], scissors: ['날카로운 조각들이 허공에 떠올라 예리한 빛을 반사합니다.', '깨진 거울 조각들이 뾰족하게 정렬됩니다.', '가느다란 빛줄기가 칼날처럼 번뜩입니다.'] } },
     { id: 'm12', name: '얼음 수정', hp: 150, atk: 17, exp: 80, goldReward: 70, icon: '❄️', pattern: 'heavy_rock', fav: '✊ 방패 강타', dialogue: '"절대 영도를 맛보아라."', hints: { rock: '극한의 냉기가 뭉쳐 절대 부서지지 않을 결정체가 됩니다.', paper: '파동이 사방으로 흩날리며 넓은 범위를 얼어붙게 합니다.', scissors: '투명하고 예리한 냉기가 당신의 심장을 겨눕니다.' } },
     { id: 'm13', name: '맹독 거미', hp: 160, atk: 20, exp: 90, goldReward: 75, icon: '🕷️', pattern: 'heavy_scissors', fav: '✌️ 쌍검 베기', dialogue: '"쉭쉭..."', hints: { rock: '몸을 한껏 웅크려 치명적인 타격으로부터 스스로를 보호합니다.', paper: '사방에 끈적한 기운을 넓게 흩뿌려 퇴로를 차단합니다.', scissors: '치명적인 독을 품은 뾰족한 두 개의 송곳니가 번뜩입니다.' } },
     { id: 'm16', name: '그림자 기사', hp: 180, atk: 22, exp: 110, goldReward: 80, icon: '👤', pattern: 'rock_scissors', fav: '방패/쌍검', dialogue: '"이곳을 지나갈 수 없다."', hints: { rock: '어둠을 둥글게 뭉쳐 뚫을 수 없는 묵직한 벽을 세웁니다.', paper: '그림자가 사방으로 길게 늘어지며 공간을 지배합니다.', scissors: '서늘하게 벼려진 칠흑의 기운이 직선으로 쏘아집니다.' } },
-    { id: 'm15', name: '왕실 근위대장 (보스)', hp: 250, atk: 24, exp: 150, goldReward: 160, icon: '👮', pattern: 'heavy_paper', fav: '✋ 마법 장막', dialogue: '"왕실의 권위는 절대 무너지지 않는다."', hints: { rock: '양발을 굳게 딛고 산처럼 묵직한 태세를 취합니다.', paper: '화려한 기운을 펄럭이며 주변의 시야를 넓게 덮습니다.', scissors: '치명적인 일격을 위해 예리한 궤적을 그어냅니다.' } },
+    { id: 'm15', name: '왕실 근위대장 (보스)', hp: 250, atk: 24, exp: 150, goldReward: 160, icon: '👮', pattern: 'heavy_paper', fav: '✋ 마법 장막', dialogue: '"왕실의 권위는 절대 무너지지 않는다."', hints: { rock: ['양발을 굳게 딛고 산처럼 묵직한 태세를 취합니다.', '방패를 앞으로 세우며 몸의 중심을 낮춥니다.', '갑옷이 무겁게 울리며 방어 자세를 잡습니다.'], paper: ['화려한 기운을 펄럭이며 주변의 시야를 넓게 덮습니다.', '왕실 깃발처럼 넓은 장막이 펼쳐집니다.', '품을 크게 벌리며 전장을 덮으려 합니다.'], scissors: ['치명적인 일격을 위해 예리한 궤적을 그어냅니다.', '창끝 같은 기운이 한 방향으로 모입니다.', '갑옷 사이로 날카로운 베기 자세가 드러납니다.'] } },
     { id: 'm17', name: '환영 마법사', hp: 200, atk: 25, exp: 130, goldReward: 90, icon: '🔮', pattern: 'paper_scissors', fav: '장막/쌍검', dialogue: '"무엇이 진짜인지 보이나?"', hints: { rock: '마력이 하나의 둥근 구체로 빽빽하게 밀집됩니다.', paper: '복잡한 흐름이 바닥을 타고 거대하게 퍼져나갑니다.', scissors: '마력이 뾰족한 형태로 변환되어 주변을 맴돕니다.' } },
     { id: 'm18', name: '황금 골렘', hp: 280, atk: 26, exp: 140, goldReward: 120, icon: '💰', pattern: 'heavy_rock', fav: '✊ 방패 강타', dialogue: '"나의 황금은 부서지지 않는다."', hints: { rock: '눈부신 기운이 한 덩어리로 굳어지며 절대적인 무게감을 뽐냅니다.', paper: '찬란한 가루들이 대기 중으로 넓게 흩뿌려집니다.', scissors: '금빛의 끝자락이 날카로운 형태로 뾰족해집니다.' } },
     { id: 'm19', name: '마왕의 호위무사', hp: 250, atk: 30, exp: 170, goldReward: 130, icon: '👹', pattern: 'heavy_scissors', fav: '✌️ 쌍검 베기', dialogue: '"마왕님을 위해 벤다!"', hints: { rock: '전신의 근육을 수축시키며 파괴적인 무게감을 버텨낼 준비를 합니다.', paper: '시커먼 기운을 사방으로 폭발시키며 모든 것을 뻗어냅니다.', scissors: '당신의 숨통을 끊어버릴 듯한 섬뜩하고 날카로운 살기가 뿜어집니다.' } },
-    { id: 'm20', name: '무승부의 마왕 (최종보스)', hp: 550, atk: 35, exp: 500, goldReward: 1000, icon: '👿', pattern: 'boss_demon', fav: '당신의 심리', dialogue: '"결국 운명은 돌고 돌아 원점이 될 것이다..."', hints: { rock: '태산조차 짓누를 듯한 숨 막히는 압박감이 한 곳으로 응축됩니다.', paper: '모든 빛을 흡수하는 끝없는 어둠이 유연하게 팽창합니다.', scissors: '영혼마저 찢어버릴 듯한 극한의 서늘한 마기가 벼려집니다.' } }
+    { id: 'm20', name: '무승부의 마왕 (최종보스)', hp: 550, atk: 35, exp: 500, goldReward: 1000, icon: '👿', pattern: 'boss_demon', fav: '당신의 심리', dialogue: '"결국 운명은 돌고 돌아 원점이 될 것이다..."', hints: { rock: ['태산조차 짓누를 듯한 숨 막히는 압박감이 한 곳으로 응축됩니다.', '검은 기운이 한 점으로 뭉치며 무겁게 가라앉습니다.', '마왕의 그림자가 단단한 벽처럼 응어리집니다.'], paper: ['모든 빛을 흡수하는 끝없는 어둠이 유연하게 팽창합니다.', '어둠이 넓게 펼쳐지며 모든 길을 감싸려 합니다.', '마왕의 망토가 전장을 뒤덮듯 크게 번집니다.'], scissors: ['영혼마저 찢어버릴 듯한 극한의 서늘한 마기가 벼려집니다.', '검은 기운이 두 갈래로 갈라져 날카롭게 솟습니다.', '마왕의 손끝에서 찢어지는 듯한 칼날 기운이 번뜩입니다.'] } }
 ];
 
 let state = {
@@ -429,18 +521,50 @@ let state = {
     currentRegion: 1, stage: 0, monster: null, monsterHp: 0, monsterNextMove: null, monsterStatus: null,
     log: [], floatingTexts: [], shakeTarget: null, shopTab: 'equip', offeredAugments: [], offeredTacticsOptions: [], turnCount: 0, bestiary: {},
     achievements: { winStreak3: false, survive1Hp: false, drawStreak5: false, maxUpgrade: false, perfectWin: false, overkill: false, rich: false, collector: false, revived: false },
-    rouletteUsed: false, crystalHintActive: false, prophecyHintActive: false, lastRenderedScreen: ''
+    rouletteUsed: false, crystalHintActive: false, prophecyHintActive: false, monsterMoveHistory: [], monsterHintText: null, lastRenderedScreen: ''
 };
 
 function ensureStateDefaults() {
+    if (!state || typeof state !== 'object') state = {};
     if (!state.player) state.player = {};
+    if (typeof state.screen === 'undefined') state.screen = 'title';
+    if (typeof state.difficulty === 'undefined') state.difficulty = 'normal';
+    if (typeof state.stage !== 'number') state.stage = 0;
+    state.stage = Math.max(0, Math.min(state.stage, MONSTERS.length - 1));
+    if (typeof state.currentRegion !== 'number') state.currentRegion = Math.floor(state.stage / 4) + 1;
     if (typeof state.prophecyHintActive === 'undefined') state.prophecyHintActive = false;
     if (typeof state.crystalHintActive === 'undefined') state.crystalHintActive = false;
+    if (typeof state.monsterHintText === 'undefined') state.monsterHintText = null;
+    if (!Array.isArray(state.monsterMoveHistory)) state.monsterMoveHistory = [];
+    if (!Array.isArray(state.log)) state.log = [];
+    if (!Array.isArray(state.floatingTexts)) state.floatingTexts = [];
+    if (!state.bestiary) state.bestiary = {};
+    if (!Array.isArray(state.offeredAugments)) state.offeredAugments = [];
+    if (!Array.isArray(state.offeredTacticsOptions)) state.offeredTacticsOptions = [];
+    if (!state.achievements) state.achievements = { winStreak3: false, survive1Hp: false, drawStreak5: false, maxUpgrade: false, perfectWin: false, overkill: false, rich: false, collector: false, revived: false };
+
     if (!state.player.inventory) state.player.inventory = { crystal: 0, cloak: 0, candy: 0, bomb: 0, flash: 0 };
+    state.player.inventory = Object.assign({ crystal: 0, cloak: 0, candy: 0, bomb: 0, flash: 0 }, state.player.inventory);
+    if (!Array.isArray(state.player.augments)) state.player.augments = [];
+    if (!Array.isArray(state.player.seenAugments)) state.player.seenAugments = [];
+    if (!state.player.stats) state.player.stats = { scissors: 0, rock: 0, paper: 0 };
+    if (!Array.isArray(state.player.history)) state.player.history = [];
+    if (!state.player.equipLevel) state.player.equipLevel = { weapon: 0, armor: 0, accessory: 0 };
     if (typeof state.player.consecutiveWins === 'undefined') state.player.consecutiveWins = 0;
     if (typeof state.player.consecutiveDraws === 'undefined') state.player.consecutiveDraws = 0;
     if (typeof state.player.buff === 'undefined') state.player.buff = null;
+    if (typeof state.player.activeBuff === 'undefined') state.player.activeBuff = null;
+    if (typeof state.player.nextBuff === 'undefined') state.player.nextBuff = null;
+    if (typeof state.player.animState === 'undefined') state.player.animState = 'idle';
     if (state.player.cls && state.player.cls.id && CLASSES[state.player.cls.id]) state.player.cls = CLASSES[state.player.cls.id];
+
+    if (['battle', 'tacticSelect'].includes(state.screen)) {
+        state.monster = MONSTERS[state.stage] || MONSTERS[0];
+        if (typeof state.monsterHp !== 'number' || state.monsterHp <= 0) state.monsterHp = state.monster.hp;
+        if (!state.monsterNextMove) determineMonsterMove();
+        else if (!state.monsterHintText) state.monsterHintText = pickMonsterHint(state.monster, state.monsterNextMove);
+    }
+    if (state.isAnimating) state.isAnimating = false;
 }
 
 const $ = (id) => document.getElementById(id);
@@ -451,14 +575,26 @@ function saveGame() { localStorage.setItem('rpsRPG_save', JSON.stringify(state))
 
 function loadGame() {
     const saved = localStorage.getItem('rpsRPG_save');
-    if (saved) {
-        state = JSON.parse(saved);
+    if (!saved) return;
+    try {
+        const parsed = JSON.parse(saved);
+        if (!parsed || !parsed.player || !parsed.player.cls) throw new Error('저장 데이터가 비어 있습니다.');
+        state = parsed;
         ensureStateDefaults();
         state.lastRenderedScreen = ''; 
+        state.isAnimating = false;
         AudioEngine.init();
         if (state.screen === 'ending') AudioEngine.playBGM('ending');
         else if (['title', 'prologue', 'difficultySelect', 'classSelect'].includes(state.screen)) AudioEngine.playBGM('title');
         else AudioEngine.playBGM(`stage${state.currentRegion}`);
+        render();
+        setTimeout(adjustScale, 0);
+    } catch (e) {
+        console.warn('Save load failed:', e);
+        localStorage.removeItem('rpsRPG_save');
+        state.screen = 'title';
+        state.isAnimating = false;
+        addLog('저장 데이터가 손상되어 새로 시작 화면으로 돌아왔습니다.', 'bad');
         render();
     }
 }
@@ -490,6 +626,17 @@ function unlockAchievement(id) {
         addLog(`🏆 업적 달성: ${ach.name}`, 'good');
         showFloatingText('player', '업적 달성!', 'text-yellow-400 drop-shadow-md');
     }
+}
+
+
+function pickMonsterHint(mon, move) {
+    if (!mon || !mon.hints || !move) return '적의 움직임을 잘 살펴보세요.';
+    const hintSource = mon.hints[move];
+    if (Array.isArray(hintSource)) {
+        if (hintSource.length === 0) return '적의 움직임을 잘 살펴보세요.';
+        return hintSource[Math.floor(Math.random() * hintSource.length)];
+    }
+    return hintSource || '적의 움직임을 잘 살펴보세요.';
 }
 
 function determineMonsterMove() {
@@ -534,7 +681,24 @@ function determineMonsterMove() {
         const remaining = ['scissors', 'rock', 'paper'].filter(m => m !== disabledMove);
         move = remaining[Math.floor(Math.random() * remaining.length)];
     }
+
+    // 같은 패가 3번 연속 나오면 재미가 떨어지므로, 3연속 반복은 자동으로 끊습니다.
+    // 단, 봉인된 패가 있으면 그 패는 계속 제외합니다.
+    if (!Array.isArray(state.monsterMoveHistory)) state.monsterMoveHistory = [];
+    const recent = state.monsterMoveHistory.slice(-2);
+    if (recent.length === 2 && recent[0] === recent[1] && move === recent[0]) {
+        const candidates = ['scissors', 'rock', 'paper'].filter(m => m !== recent[0] && m !== disabledMove);
+        if (candidates.length > 0) {
+            move = candidates[Math.floor(Math.random() * candidates.length)];
+        }
+    }
+
     state.monsterNextMove = move;
+    // 한 턴 동안 힌트가 바뀌지 않도록, 패가 정해지는 순간 힌트도 함께 고정합니다.
+    // 배열 힌트도 여기서 한 번만 랜덤 선택되어 같은 턴에 두 문장이 보이지 않습니다.
+    state.monsterHintText = pickMonsterHint(mon, move);
+    state.monsterMoveHistory.push(move);
+    if (state.monsterMoveHistory.length > 4) state.monsterMoveHistory.shift();
 }
 
 // 각종 화면 전환 처리
@@ -613,6 +777,7 @@ function startBattle() {
     state.screen = 'battle'; 
     state.player.buff = null; 
     state.turnCount = 0;
+    state.monsterMoveHistory = [];
     state.player.consecutiveWins = 0; 
     state.player.consecutiveDraws = 0; 
     state.monsterStatus = null; 
@@ -1290,7 +1455,7 @@ function renderBattleMobile(audioBtn, transitionClass, bgImage) {
     const monHpPercent = Math.max(0, (state.monsterHp / mon.hp) * 100);
     const pHpPercent = Math.max(0, (p.hp / p.maxHp) * 100);
 
-    let hintText = mon.hints[state.monsterNextMove];
+    let hintText = state.monsterHintText || pickMonsterHint(mon, state.monsterNextMove);
     let showVisualBubble = false; let visualBubbleIcon = '';
 
     if (state.crystalHintActive && state.turnCount === 0) {
@@ -1412,7 +1577,7 @@ function renderBattle(audioBtn, transitionClass, bgImage) {
     const monHpPercent = Math.max(0, (state.monsterHp / mon.hp) * 100);
     const pHpPercent = Math.max(0, (p.hp / p.maxHp) * 100);
     
-    let hintText = mon.hints[state.monsterNextMove];
+    let hintText = state.monsterHintText || pickMonsterHint(mon, state.monsterNextMove);
     let showVisualBubble = false; let visualBubbleIcon = '';
 
     if (state.crystalHintActive && state.turnCount === 0) { 
@@ -1569,12 +1734,19 @@ function renderAugmentSelect(audioBtn, transitionClass, bgImage) {
 }
 
 function renderVictory(audioBtn, transitionClass, bgImage) {
+    const victoryTitle = [3, 7, 11, 15, 19].includes(state.stage - 1) ? '보스 격파!' : '전투 승리!';
+    const victorySubtitle = state.monster ? `${state.monster.name}을(를) 쓰러뜨렸다!` : '적을 물리쳤다!';
     return audioBtn + `
         <div class="w-full h-full flex flex-col items-center justify-center ${transitionClass} bg-cover bg-center relative" style="background-image: url('${bgImage}');">
             <div class="absolute inset-0 bg-slate-900/70 z-0"></div>
             <div class="z-10 relative flex flex-col items-center justify-center w-full max-w-5xl mx-auto px-6 py-4">
-                <div class="text-[72px] mb-2 drop-shadow-2xl leading-none">🎉</div>
-                <h2 class="text-5xl font-bold text-yellow-400 mb-5 title-font drop-shadow-lg">정비 시간</h2>
+                <div class="w-full mb-5">
+                    <div class="bg-yellow-500/20 border-4 border-yellow-400 rounded-[2rem] px-8 py-5 shadow-2xl text-center backdrop-blur-md">
+                        <div class="text-[72px] mb-1 drop-shadow-2xl leading-none">🎉</div>
+                        <h2 class="text-6xl font-bold text-yellow-300 title-font drop-shadow-lg leading-none">${victoryTitle}</h2>
+                        <p class="text-2xl text-white mt-4 font-bold drop-shadow">${victorySubtitle}</p>
+                    </div>
+                </div>
                 
                 <div class="bg-slate-800/80 backdrop-blur-md rounded-[2rem] p-6 w-full mb-6 text-left border-4 border-slate-500 shadow-2xl flex flex-row gap-7 items-center">
                     <img onerror="this.onerror=null; this.style.display='none';" src="./assets_hero/${state.player.cls.imgPrefix}_idle.png" class="border-4 border-slate-500 rounded-3xl shrink-0 shadow-xl bg-white object-cover" style="width: 150px; height: 150px; image-rendering: pixelated;" alt="Player">
@@ -1693,8 +1865,22 @@ function renderShop(audioBtn, transitionClass, bgImage) {
 }
 
 function renderBestiary(audioBtn, transitionClass, bgImage) {
+    const patternLabels = {
+        random: '무작위로 공격합니다.',
+        heavy_rock: '방패 강타를 자주 사용합니다.',
+        heavy_scissors: '쌍검 베기를 자주 사용합니다.',
+        heavy_paper: '마법 장막을 자주 사용합니다.',
+        boss_golem: '세 번째 턴마다 강하게 버팁니다.',
+        boss_swordsman: '쌍검 베기를 즐겨 쓰는 보스입니다.',
+        boss_demon: '플레이어의 습관을 읽으려 합니다.',
+        counter: '자주 쓰는 패를 노려 반격합니다.',
+        rock_scissors: '방패와 쌍검을 섞어 사용합니다.',
+        paper_scissors: '장막과 쌍검을 섞어 사용합니다.'
+    };
     const listHtml = MONSTERS.map(m => {
         const unlocked = state.bestiary[m.id];
+        const bestiaryText = m.desc || m.dialogue || patternLabels[m.pattern] || '아직 자세한 정보가 없습니다.';
+        const patternText = patternLabels[m.pattern] || '특별한 패턴을 가졌습니다.';
         if (unlocked) {
             return `
             <div class="bg-slate-800/80 backdrop-blur-md p-4 rounded-3xl border-4 border-slate-500 flex flex-col gap-3 shadow-xl text-left min-h-[165px] hover:-translate-y-1 transition-transform">
@@ -1705,7 +1891,8 @@ function renderBestiary(audioBtn, transitionClass, bgImage) {
                         <p class="text-[15px] font-bold text-yellow-300 bg-slate-900/60 inline-block px-2.5 py-1 rounded-xl shadow-inner break-keep">기술: ${m.fav}</p>
                     </div>
                 </div>
-                <p class="text-[16px] text-slate-200 leading-snug text-balance drop-shadow-sm line-clamp-3">${m.desc}</p>
+                <p class="text-[16px] text-slate-200 leading-snug text-balance drop-shadow-sm line-clamp-2">${bestiaryText}</p>
+                <p class="text-[15px] text-blue-200 leading-snug bg-slate-900/50 px-3 py-2 rounded-xl border border-slate-600/70">특징: ${patternText}</p>
             </div>`;
         } else {
             return `
@@ -1786,42 +1973,69 @@ function renderGameover(audioBtn, transitionClass, bgImage) {
 }
 
 function renderEnding(audioBtn, transitionClass, endingBg) {
-    const completedAchievements = Object.values(state.achievements).filter(v => v === true).length;
+    const completedAchievements = Object.values(state.achievements || {}).filter(v => v === true).length;
     const totalAchievements = ACHIEVEMENTS_LIST.length;
-    
-    return audioBtn + `
-        <div class="w-full h-full flex flex-col items-center justify-center bg-black relative p-6 overflow-hidden">
-            <div class="absolute inset-0 bg-cover bg-center opacity-45" style="background-image: url('${endingBg}');"></div>
-            <div class="absolute inset-0 bg-slate-950/75 z-0"></div>
-            <div class="absolute inset-0 bg-cover bg-center opacity-20 fade-in-slow" style="background-image: url('${endingBg}'); animation-delay: 8s;"></div>
-            <div class="z-10 relative max-w-4xl w-full text-center space-y-10 my-auto pb-10 mt-12">
-                <h2 class="text-7xl text-yellow-400 font-bold title-font mb-4 fade-in-slow">가위바위보 히어로 키우기</h2>
-                <p class="text-3xl text-slate-200 leading-loose fade-in-slow" style="animation-delay: 1.5s; opacity: 0;">마지막 승부가 끝났다.</p>
-                <p class="text-3xl text-slate-200 leading-loose fade-in-slow" style="animation-delay: 3s; opacity: 0;">마왕의 그림자는 사라지고,<br>멈춰 있던 왕국의 시간이 다시 흐르기 시작했다.</p>
-                <div class="text-2xl text-slate-300 leading-loose fade-in-slow" style="animation-delay: 4.5s; opacity: 0;">
-                    <p>가위는 다시 길을 열고,</p>
-                    <p>바위는 다시 왕국을 지키고,</p>
-                    <p>보는 다시 모두를 감싸 안았다.</p>
-                </div>
-                <p class="text-3xl text-slate-200 leading-loose fade-in-slow" style="animation-delay: 6s; opacity: 0;">세 힘의 균형은 되돌아왔다.<br>그리고 사람들은 그날의 히어로를 오래도록 기억했다.</p>
-                <p class="text-5xl text-yellow-400 font-bold title-font leading-loose fade-in-slow" style="animation-delay: 7.5s; opacity: 0;">당신은 진정한 가위바위보 히어로입니다.</p>
-                
-                <div class="fade-in-slow" style="animation-delay: 9s; opacity: 0;">
-                    <h1 class="text-[100px] text-white font-bold title-font mt-12 mb-8 drop-shadow-lg">THE END</h1>
-                    
-                    <div class="bg-slate-800/80 p-10 rounded-3xl border-4 border-slate-600 shadow-2xl flex flex-row items-center justify-center gap-8 mb-8 text-left max-w-2xl mx-auto backdrop-blur-md">
-                        <img onerror="this.onerror=null; this.style.display='none';" src="./assets_hero/${state.player.cls.imgPrefix}_idle.png" class="border-4 border-slate-500 rounded-3xl shrink-0 bg-white shadow-xl object-cover w-[160px] h-[160px]" style="image-rendering: pixelated;" alt="Player">
-                        <div class="text-2xl font-bold text-slate-200 space-y-4 w-full">
-                            <p class="text-green-300 text-4xl mb-4 title-font">최종 결과</p>
-                            <p>히어로: <span class="text-white">${state.player.cls.name}</span></p>
-                            <p>최종 레벨: <span class="text-white">Lv.${state.player.level}</span></p>
-                            <p>보유 골드: <span class="text-yellow-400">${state.player.gold} G</span></p>
-                            <p>수집 증강: <span class="text-purple-300">${state.player.augments.length} 개</span></p>
-                            <p>달성 업적: <span class="text-pink-400">${completedAchievements} / ${totalAchievements}</span></p>
+    const heroImg = state.player && state.player.cls ? state.player.cls.imgPrefix : 'sword';
+    const heroName = state.player && state.player.cls ? state.player.cls.name : '가위바위보 히어로';
+    const level = state.player && state.player.level ? state.player.level : 1;
+    const gold = state.player && typeof state.player.gold === 'number' ? state.player.gold : 0;
+    const augCount = state.player && Array.isArray(state.player.augments) ? state.player.augments.length : 0;
+    const mobilePortrait = isMobilePortraitMode();
+    const endingHeroesImg = './assets_ending/ending_heroes.png';
+
+    if (mobilePortrait) {
+        return audioBtn + `
+            <div class="w-full h-full bg-black relative overflow-hidden ${transitionClass}">
+                <div class="absolute inset-0 bg-cover bg-center opacity-55" style="background-image: url('${endingBg}');"></div>
+                <div class="absolute inset-0 bg-slate-950/70"></div>
+                <div class="relative z-10 h-full flex flex-col items-center justify-center px-8 py-10 text-center">
+                    <img onerror="this.onerror=null; this.style.display='none';" src="${endingHeroesImg}" class="mx-auto max-h-[220px] w-auto object-contain drop-shadow-2xl mb-3" alt="엔딩 히어로">
+                    <h2 class="text-[46px] text-yellow-300 font-bold title-font leading-tight drop-shadow-lg mb-4">왕국을 구했다!</h2>
+                    <p class="text-[24px] text-slate-100 font-bold leading-relaxed mb-5 break-keep">세 힘의 균형이 돌아왔고,<br>사람들은 오늘의 히어로를 기억했습니다.</p>
+                    <h1 class="text-[64px] text-white font-bold title-font leading-none drop-shadow-lg mb-5">THE END</h1>
+                    <div class="bg-slate-900/80 border-4 border-slate-500 rounded-[2rem] p-6 w-full max-w-[620px] shadow-2xl backdrop-blur-md">
+                        <img onerror="this.onerror=null; this.style.display='none';" src="./assets_hero/${heroImg}_idle.png" class="mx-auto border-4 border-slate-500 rounded-3xl bg-white shadow-xl object-cover w-[130px] h-[130px] mb-4" style="image-rendering: pixelated;" alt="Player">
+                        <p class="text-green-300 text-[34px] font-bold title-font mb-3">최종 결과</p>
+                        <div class="grid grid-cols-2 gap-3 text-[21px] font-bold text-slate-100 text-left">
+                            <p class="bg-slate-800/80 rounded-xl p-3 col-span-2 text-center">히어로: <span class="text-white">${heroName}</span></p>
+                            <p class="bg-slate-800/80 rounded-xl p-3">Lv.${level}</p>
+                            <p class="bg-slate-800/80 rounded-xl p-3 text-yellow-300">${gold} G</p>
+                            <p class="bg-slate-800/80 rounded-xl p-3 text-purple-300">증강 ${augCount}</p>
+                            <p class="bg-slate-800/80 rounded-xl p-3 text-pink-300">업적 ${completedAchievements}/${totalAchievements}</p>
                         </div>
                     </div>
-                    <button onclick="restartGame()" class="bg-blue-600 hover:bg-blue-500 text-white font-bold py-6 px-16 rounded-3xl shadow-2xl border-b-8 border-blue-800 active:border-b-0 active:mt-2 transition-all text-4xl">타이틀로 돌아가기</button>
+                    <button onclick="restartGame()" class="mt-6 bg-blue-600 hover:bg-blue-500 text-white font-bold py-5 px-12 rounded-3xl shadow-2xl border-b-8 border-blue-800 active:border-b-0 active:mt-8 transition-all text-[30px]">타이틀로 돌아가기</button>
                 </div>
+            </div>
+        `;
+    }
+
+    return audioBtn + `
+        <div class="w-full h-full bg-black relative overflow-hidden ${transitionClass}">
+            <div class="absolute inset-0 bg-cover bg-center opacity-60" style="background-image: url('${endingBg}');"></div>
+            <div class="absolute inset-0 bg-slate-950/65 z-0"></div>
+            <div class="z-10 relative h-full w-full flex flex-col items-center justify-center px-10 py-6 text-center">
+                <img onerror="this.onerror=null; this.style.display='none';" src="${endingHeroesImg}" class="mx-auto max-h-[170px] w-auto object-contain drop-shadow-2xl mb-2" alt="엔딩 히어로">
+                <h2 class="text-[50px] text-yellow-300 font-bold title-font leading-none mb-2 drop-shadow-lg">가위바위보 히어로 키우기</h2>
+                <p class="text-[22px] text-slate-100 leading-relaxed font-bold mb-1 drop-shadow break-keep">마지막 승부가 끝나고, 왕국의 시간이 다시 흐르기 시작했다.</p>
+                <p class="text-[20px] text-slate-200 leading-relaxed mb-2 drop-shadow break-keep">가위는 길을 열고, 바위는 왕국을 지키고, 보는 모두를 감싸 안았다.</p>
+                <p class="text-[32px] text-yellow-300 font-bold title-font leading-tight mb-2 drop-shadow-lg break-keep">당신은 진정한 가위바위보 히어로입니다.</p>
+                <h1 class="text-[68px] text-white font-bold title-font leading-none mb-3 drop-shadow-lg">THE END</h1>
+                
+                <div class="bg-slate-900/80 p-5 rounded-3xl border-4 border-slate-600 shadow-2xl flex flex-row items-center justify-center gap-6 mb-5 text-left max-w-[780px] w-full backdrop-blur-md">
+                    <img onerror="this.onerror=null; this.style.display='none';" src="./assets_hero/${heroImg}_idle.png" class="border-4 border-slate-500 rounded-3xl shrink-0 bg-white shadow-xl object-cover w-[130px] h-[130px]" style="image-rendering: pixelated;" alt="Player">
+                    <div class="text-[22px] font-bold text-slate-200 w-full">
+                        <p class="text-green-300 text-[34px] mb-3 title-font">최종 결과</p>
+                        <div class="grid grid-cols-2 gap-x-5 gap-y-2">
+                            <p>히어로: <span class="text-white">${heroName}</span></p>
+                            <p>최종 레벨: <span class="text-white">Lv.${level}</span></p>
+                            <p>보유 골드: <span class="text-yellow-400">${gold} G</span></p>
+                            <p>수집 증강: <span class="text-purple-300">${augCount} 개</span></p>
+                            <p class="col-span-2">달성 업적: <span class="text-pink-400">${completedAchievements} / ${totalAchievements}</span></p>
+                        </div>
+                    </div>
+                </div>
+                <button onclick="restartGame()" class="bg-blue-600 hover:bg-blue-500 text-white font-bold py-4 px-14 rounded-3xl shadow-2xl border-b-8 border-blue-800 active:border-b-0 active:mt-2 transition-all text-[30px]">타이틀로 돌아가기</button>
             </div>
         </div>
     `;
