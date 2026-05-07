@@ -11,11 +11,13 @@
         ========================================= */
         @import url('https://fonts.googleapis.com/css2?family=Gowun+Dodum&family=Jua&display=swap');
         
+        :root { --app-height: 100dvh; }
+
         html, body {
             margin: 0;
             padding: 0;
             width: 100%;
-            height: 100%;
+            height: var(--app-height);
             overflow: hidden;
             background-color: #000;
         }
@@ -101,8 +103,8 @@
         */
         #main-wrapper {
             width: 100vw;
-            height: 100dvh;
-            min-height: 100vh;
+            height: var(--app-height);
+            min-height: 0;
             position: relative;
             overflow: hidden;
             background: #000;
@@ -127,10 +129,10 @@
             text-rendering: optimizeLegibility;
         }
 
-        /* 가로 모드 강제: 세로 화면에서는 게임을 숨기고 회전 안내만 표시 */
+        /* PC/패드/모바일 공통: 세로도 별도 UI로 지원하므로 회전 안내는 기본 숨김 */
         @media screen and (orientation: portrait) {
-            #portrait-warning { display: flex !important; }
-            #main-wrapper { display: none !important; }
+            #portrait-warning { display: none !important; }
+            #main-wrapper { display: flex !important; align-items: center !important; justify-content: center !important; }
         }
 
         @media screen and (orientation: landscape) {
@@ -168,7 +170,7 @@ const BASE_WIDTH = 1280;
 const BASE_HEIGHT = 720;
 
 function getViewportSize() {
-    // 모바일 브라우저 주소창 변화까지 최대한 안정적으로 반영
+    // 모바일 브라우저 주소창/하단바 변화까지 최대한 안정적으로 반영
     const viewport = window.visualViewport;
     return {
         width: viewport ? viewport.width : window.innerWidth,
@@ -176,18 +178,20 @@ function getViewportSize() {
     };
 }
 
-function isPortraitMode() {
-    const { width, height } = getViewportSize();
-    return height > width;
+function setAppHeight() {
+    const { height } = getViewportSize();
+    document.documentElement.style.setProperty('--app-height', `${Math.max(1, height)}px`);
 }
 
 function isMobilePortraitMode() {
-    // 기존 렌더 함수들이 참조하므로 이름은 유지합니다.
-    // 이제 세로 UI를 따로 만들지 않고, 모든 세로 화면에서 회전 안내만 표시합니다.
-    return isPortraitMode();
+    const { width, height } = getViewportSize();
+    const ua = navigator.userAgent || '';
+    const isTouchMobile = /Android|iPhone|iPod|Mobile/i.test(ua) || (navigator.maxTouchPoints > 1 && Math.min(width, height) <= 820);
+    return isTouchMobile && height > width;
 }
 
 function adjustScale() {
+    setAppHeight();
     const container = document.getElementById('game-container');
     const wrapper = document.getElementById('main-wrapper');
     if (!container) return;
@@ -195,19 +199,20 @@ function adjustScale() {
     const { width: winW, height: winH } = getViewportSize();
     const safeW = Math.max(1, winW);
     const safeH = Math.max(1, winH);
+    const mobilePortrait = isMobilePortraitMode();
 
-    // 게임 본편은 항상 1280x720 가로 캔버스를 기준으로 유지합니다.
-    // 세로 화면에서는 CSS가 #main-wrapper를 숨기고 #portrait-warning만 보여줍니다.
-    const baseW = BASE_WIDTH;
-    const baseH = BASE_HEIGHT;
+    // 모바일 세로에서는 720x1280 세로 캔버스,
+    // PC/태블릿 가로에서는 1280x720 가로 캔버스를 유지합니다.
+    const baseW = mobilePortrait ? 720 : BASE_WIDTH;
+    const baseH = mobilePortrait ? 1280 : BASE_HEIGHT;
 
     container.style.width = `${baseW}px`;
     container.style.height = `${baseH}px`;
+    container.style.transform = 'none';
     container.style.left = 'auto';
     container.style.top = 'auto';
     container.style.position = 'relative';
-    container.style.transformOrigin = 'center center';
-    document.body.classList.toggle('mobile-portrait', false);
+    document.body.classList.toggle('mobile-portrait', mobilePortrait);
 
     if (wrapper) {
         wrapper.style.overflow = 'hidden';
@@ -215,28 +220,33 @@ function adjustScale() {
         wrapper.style.alignItems = 'center';
         wrapper.style.justifyContent = 'center';
         wrapper.style.placeItems = 'center';
-        wrapper.style.width = '100vw';
-        wrapper.style.height = '100dvh';
     }
 
-    // 화면 안에 16:9 게임 캔버스가 잘리지 않도록 여유값을 살짝 둡니다.
-    const fit = Math.min(safeW / baseW, safeH / baseH) * 0.995;
+    const fit = Math.min(safeW / baseW, safeH / baseH) * (mobilePortrait ? 1 : 0.995);
 
-    // Chrome/Edge/모바일 브라우저에서는 zoom이 텍스트 선명도에 유리합니다.
-    // zoom 미지원 환경에서는 transform scale로 동일 비율을 보장합니다.
-    if (window.CSS && CSS.supports && CSS.supports('zoom', '1')) {
-        container.style.zoom = fit;
-        container.style.transform = 'none';
-    } else {
-        container.style.zoom = '1';
+    // 핵심 수정: transform: scale() 대신 zoom 사용.
+    // 텍스트가 0.2초 뒤 흐려지는 현상을 크게 줄입니다.
+    container.style.zoom = fit;
+
+    // 일부 브라우저에서 zoom을 무시할 때만 최소 fallback을 사용합니다.
+    // 일반 PC Chrome/Edge, 모바일 Chrome/Safari에서는 zoom이 우선 적용됩니다.
+    if (container.style.zoom === '') {
         container.style.transform = `scale(${fit})`;
     }
 }
 
+let lastPortraitLayoutMode = null;
 function handleViewportChange() {
+    setAppHeight();
+    const mode = isMobilePortraitMode();
     adjustScale();
+    if (lastPortraitLayoutMode !== null && lastPortraitLayoutMode !== mode) {
+        render();
+    }
+    lastPortraitLayoutMode = mode;
 }
 
+setAppHeight();
 window.addEventListener('resize', handleViewportChange);
 window.addEventListener('orientationchange', () => {
     setTimeout(handleViewportChange, 50);
@@ -1287,6 +1297,23 @@ function restartGame() {
 
 function renderTitle(audioBtn, transitionClass, titleBg) {
     const canLoad = !!localStorage.getItem('rpsRPG_save');
+    const mobilePortrait = isMobilePortraitMode();
+    if (mobilePortrait) {
+        return audioBtn + `
+        <div class="w-full h-full flex flex-col items-center justify-center ${transitionClass} bg-cover bg-center relative px-8 py-8" style="background-image: url('${titleBg}');">
+            <div class="absolute inset-0 bg-slate-900/72 z-0"></div>
+            <div class="z-10 relative flex flex-col items-center justify-center w-full h-full text-center">
+                <div class="text-[86px] mb-5 drop-shadow-xl leading-none">✌️✊✋</div>
+                <h1 class="text-[56px] font-bold text-yellow-400 mb-5 title-font drop-shadow-lg leading-tight break-keep">가위바위보<br>히어로 키우기</h1>
+                <p class="text-slate-200 mb-4 text-[25px] font-bold drop-shadow break-keep">총 5개의 지역, 20개의 스테이지!</p>
+                <p class="text-slate-300 mb-10 text-[21px] leading-relaxed drop-shadow-md break-keep">전투 기술을 구사하고<br>적의 심리를 읽어내세요!</p>
+                <div class="flex flex-col gap-5 w-full max-w-[560px]">
+                    <button onclick="startGame()" class="bg-blue-600 hover:bg-blue-500 text-white font-bold py-6 px-8 rounded-3xl shadow-2xl border-b-8 border-blue-800 active:border-b-0 active:mt-2 transition-all text-[34px]">새 모험 시작</button>
+                    ${canLoad ? `<button onclick="loadGame()" class="bg-green-600 hover:bg-green-500 text-white font-bold py-6 px-8 rounded-3xl shadow-2xl border-b-8 border-green-800 active:border-b-0 active:mt-2 transition-all text-[34px]">이어서 하기</button>` : ''}
+                </div>
+            </div>
+        </div>`;
+    }
     return audioBtn + `
         <div class="w-full h-full flex flex-col items-center justify-center ${transitionClass} bg-cover bg-center relative" style="background-image: url('${titleBg}');">
             <div class="absolute inset-0 bg-slate-900/70 z-0"></div>
@@ -1305,40 +1332,59 @@ function renderTitle(audioBtn, transitionClass, titleBg) {
 }
 
 function renderPrologue(audioBtn, transitionClass, titleBg) {
+    const mobilePortrait = isMobilePortraitMode();
+    const shell = mobilePortrait ? 'p-8' : 'p-6';
+    const box = mobilePortrait ? 'max-w-[620px] space-y-7' : 'max-w-4xl space-y-8';
+    const p1 = mobilePortrait ? 'text-[29px] leading-relaxed' : 'text-4xl leading-loose';
+    const p2 = mobilePortrait ? 'text-[27px] leading-relaxed' : 'text-3xl leading-loose';
+    const p3 = mobilePortrait ? 'text-[29px] leading-relaxed' : 'text-4xl leading-loose';
+    const p4 = mobilePortrait ? 'text-[38px] leading-snug' : 'text-5xl leading-loose';
     return audioBtn + `
-        <div class="w-full h-full flex flex-col items-center justify-center bg-cover bg-center relative p-6 cursor-pointer ${transitionClass}" style="background-image: url('${titleBg}');" onclick="goToDifficulty()">
+        <div class="w-full h-full flex flex-col items-center justify-center bg-cover bg-center relative ${shell} cursor-pointer ${transitionClass}" style="background-image: url('${titleBg}');" onclick="goToDifficulty()">
             <div class="absolute inset-0 bg-slate-950/75 z-0"></div>
-            <div class="z-10 relative max-w-4xl w-full text-center space-y-8">
-                <p class="text-4xl text-slate-200 leading-loose fade-in-slow" style="animation-delay: 0.5s;">먼 옛날, 세 가지 힘으로 지켜지던 왕국이 있었다.</p>
-                <div class="text-3xl text-slate-300 leading-loose fade-in-slow" style="animation-delay: 2.5s;">
+            <div class="z-10 relative ${box} w-full text-center">
+                <p class="${p1} text-slate-200 fade-in-slow break-keep" style="animation-delay: 0.5s;">먼 옛날, 세 가지 힘으로 지켜지던 왕국이 있었다.</p>
+                <div class="${p2} text-slate-300 fade-in-slow break-keep" style="animation-delay: 2.5s;">
                     <p>베어내는 힘, <span class="text-red-400 font-bold">가위</span>.</p>
                     <p>막아내는 힘, <span class="text-yellow-400 font-bold">바위</span>.</p>
                     <p>감싸는 힘, <span class="text-blue-400 font-bold">보</span>.</p>
                 </div>
-                <p class="text-4xl text-slate-200 leading-loose fade-in-slow" style="animation-delay: 4.5s;">세 힘의 균형이 무너진 밤,<br>왕좌에는 무승부의 마왕이 나타났다.</p>
-                <p class="text-5xl text-yellow-400 font-bold title-font leading-loose fade-in-slow" style="animation-delay: 6.5s;">이제 왕국을 구할 히어로를 선택하라.</p>
-                <p class="text-xl text-slate-500 mt-12 animate-pulse fade-in-slow" style="animation-delay: 8.5s;">화면을 터치하여 계속...</p>
+                <p class="${p3} text-slate-200 fade-in-slow break-keep" style="animation-delay: 4.5s;">세 힘의 균형이 무너진 밤,<br>왕좌에는 무승부의 마왕이 나타났다.</p>
+                <p class="${p4} text-yellow-400 font-bold title-font fade-in-slow break-keep" style="animation-delay: 6.5s;">이제 왕국을 구할<br class="${mobilePortrait ? '' : 'hidden'}"> 히어로를 선택하라.</p>
+                <p class="${mobilePortrait ? 'text-[20px]' : 'text-xl'} text-slate-500 mt-8 animate-pulse fade-in-slow" style="animation-delay: 8.5s;">화면을 터치하여 계속...</p>
             </div>
         </div>
     `;
 }
 
 function renderDifficulty(audioBtn, transitionClass, titleBg) {
+    const mobilePortrait = isMobilePortraitMode();
+    const shell = mobilePortrait ? 'justify-start max-w-[640px] px-7 py-10 overflow-y-auto no-scrollbar' : 'justify-center max-w-5xl';
+    const title = mobilePortrait ? 'text-[56px] mb-8' : 'text-6xl mb-12';
+    const list = mobilePortrait ? 'flex flex-col gap-6 w-full pb-6' : 'flex flex-row gap-8 w-full px-6';
+    const card = mobilePortrait ? 'w-full bg-slate-800/85 backdrop-blur-md hover:bg-slate-700 p-7 rounded-3xl border-4 flex flex-row items-center gap-6 text-left transition-all shadow-2xl group focus:outline-none min-h-[230px]' : 'flex-1 bg-slate-800/80 backdrop-blur-md hover:bg-slate-700 p-10 rounded-3xl border-4 flex flex-col items-center text-center transition-all hover:-translate-y-2 shadow-2xl group focus:outline-none';
+    const icon = mobilePortrait ? 'text-[72px] shrink-0 w-[110px] text-center' : 'text-[80px] mb-4';
+    const name = mobilePortrait ? 'text-[38px] mb-3' : 'text-4xl mb-4';
+    const desc = mobilePortrait ? 'text-[24px] leading-snug break-keep' : 'text-xl leading-relaxed text-balance';
     return audioBtn + `
         <div class="w-full h-full flex flex-col items-center justify-center ${transitionClass} bg-cover bg-center relative" style="background-image: url('${titleBg}');">
             <div class="absolute inset-0 bg-slate-900/80 z-0"></div>
-            <div class="z-10 relative flex flex-col h-full w-full max-w-5xl mx-auto items-center justify-center">
-                <h2 class="text-6xl text-center text-yellow-400 mb-12 title-font drop-shadow-md">난이도 선택</h2>
-                <div class="flex flex-row gap-8 w-full px-6">
-                    <button onclick="selectDifficulty('easy')" class="flex-1 bg-slate-800/80 backdrop-blur-md hover:bg-slate-700 p-10 rounded-3xl border-4 border-green-500 flex flex-col items-center text-center transition-all hover:-translate-y-2 shadow-2xl group focus:outline-none">
-                        <div class="text-[80px] mb-4">👼</div>
-                        <h3 class="text-4xl font-bold text-green-400 mb-4 drop-shadow">쉬움 모드</h3>
-                        <p class="text-xl text-slate-200 leading-relaxed text-balance">시작 골드 +100G<br>기본 체력 +20<br>가볍게 즐기기 좋습니다.</p>
+            <div class="z-10 relative flex flex-col h-full w-full mx-auto items-center ${shell}">
+                <h2 class="${title} text-center text-yellow-400 title-font drop-shadow-md shrink-0">난이도 선택</h2>
+                <div class="${list}">
+                    <button onclick="selectDifficulty('easy')" class="${card} border-green-500">
+                        <div class="${icon}">👼</div>
+                        <div class="flex-1 min-w-0">
+                            <h3 class="${name} font-bold text-green-400 drop-shadow">쉬움 모드</h3>
+                            <p class="${desc} text-slate-200">시작 골드 +100G<br>기본 체력 +20<br>가볍게 즐기기 좋습니다.</p>
+                        </div>
                     </button>
-                    <button onclick="selectDifficulty('normal')" class="flex-1 bg-slate-800/80 backdrop-blur-md hover:bg-slate-700 p-10 rounded-3xl border-4 border-red-500 flex flex-col items-center text-center transition-all hover:-translate-y-2 shadow-2xl group focus:outline-none">
-                        <div class="text-[80px] mb-4">⚔️</div>
-                        <h3 class="text-4xl font-bold text-red-400 mb-4 drop-shadow">보통 모드</h3>
-                        <p class="text-xl text-slate-200 leading-relaxed text-balance">기본 설정으로 진행합니다.<br>진정한 RPG의 맛!</p>
+                    <button onclick="selectDifficulty('normal')" class="${card} border-red-500">
+                        <div class="${icon}">⚔️</div>
+                        <div class="flex-1 min-w-0">
+                            <h3 class="${name} font-bold text-red-400 drop-shadow">보통 모드</h3>
+                            <p class="${desc} text-slate-200">기본 설정으로 진행합니다.<br>진정한 RPG의 맛!</p>
+                        </div>
                     </button>
                 </div>
             </div>
@@ -1396,15 +1442,20 @@ function renderClassSelect(audioBtn, transitionClass, titleBg) {
 }
 
 function renderRegionIntro(audioBtn, transitionClass, bgImage, region) {
+    const mobilePortrait = isMobilePortraitMode();
+    const title = mobilePortrait ? 'text-[52px] mb-8' : 'text-7xl mb-12';
+    const desc = mobilePortrait ? 'text-[31px] leading-relaxed' : 'text-4xl leading-loose';
+    const box = mobilePortrait ? 'p-5 mb-10 max-w-[620px]' : 'p-8 mb-16 max-w-4xl';
+    const btn = mobilePortrait ? 'py-6 px-12 text-[34px]' : 'py-6 px-24 text-4xl';
     return audioBtn + `
-        <div class="w-full h-full flex flex-col items-center justify-center ${transitionClass} bg-cover bg-center relative" style="background-image: url('${bgImage}');">
+        <div class="w-full h-full flex flex-col items-center justify-center ${transitionClass} bg-cover bg-center relative px-6" style="background-image: url('${bgImage}');">
             <div class="absolute inset-0 bg-slate-900/70 z-0"></div>
-            <div class="z-10 relative flex flex-col items-center justify-center w-full px-6">
-                <h2 class="text-7xl font-bold text-green-400 mb-12 title-font drop-shadow-lg text-center break-keep fade-in-slow" style="animation-delay: 0.5s;">${region.name}</h2>
-                <div class="bg-transparent p-8 mb-16 max-w-4xl w-full text-center">
-                    <p class="text-slate-200 text-4xl leading-loose text-balance drop-shadow-md font-bold fade-in-slow" style="animation-delay: 2s;">${region.desc}</p>
+            <div class="z-10 relative flex flex-col items-center justify-center w-full h-full">
+                <h2 class="${title} font-bold text-green-400 title-font drop-shadow-lg text-center break-keep fade-in-slow" style="animation-delay: 0.5s;">${region.name}</h2>
+                <div class="bg-transparent ${box} w-full text-center">
+                    <p class="text-slate-200 ${desc} text-balance drop-shadow-md font-bold fade-in-slow break-keep" style="animation-delay: 2s;">${region.desc}</p>
                 </div>
-                <button onclick="startTacticSelect()" class="bg-blue-600 hover:bg-blue-500 text-white font-bold py-6 px-24 rounded-3xl shadow-xl border-b-8 border-blue-800 active:border-b-0 active:mt-2 transition-all text-4xl fade-in-slow" style="animation-delay: 4.5s;">진입하기</button>
+                <button onclick="startTacticSelect()" class="bg-blue-600 hover:bg-blue-500 text-white font-bold ${btn} rounded-3xl shadow-xl border-b-8 border-blue-800 active:border-b-0 active:mt-2 transition-all fade-in-slow" style="animation-delay: 4.5s;">진입하기</button>
             </div>
         </div>
     `;
@@ -1412,159 +1463,40 @@ function renderRegionIntro(audioBtn, transitionClass, bgImage, region) {
 
 function renderTacticSelect(audioBtn, transitionClass, bgImage) {
     const mon = state.monster;
+    const mobilePortrait = isMobilePortraitMode();
     const tacticsHtml = state.offeredTacticsOptions.map(t => `
-        <button onclick="chooseTactic('${t.id}')" class="bg-slate-800/80 backdrop-blur-md hover:bg-slate-700 p-8 rounded-3xl border-4 border-slate-500 text-left transition-all hover:-translate-y-2 flex flex-col shadow-2xl focus:outline-none group">
-            <div class="text-5xl mb-6 drop-shadow group-hover:scale-110 transition-transform">${t.icon}</div>
-            <h3 class="text-3xl font-bold text-white mb-4 drop-shadow">${t.name}</h3>
-            <p class="text-xl text-slate-200 mt-auto leading-relaxed drop-shadow break-keep">${t.desc}</p>
+        <button onclick="chooseTactic('${t.id}')" class="bg-slate-800/80 backdrop-blur-md hover:bg-slate-700 ${mobilePortrait ? 'p-5 flex-row items-center gap-5 min-h-[170px]' : 'p-8 flex-col'} rounded-3xl border-4 border-slate-500 text-left transition-all hover:-translate-y-1 flex shadow-2xl focus:outline-none group">
+            <div class="${mobilePortrait ? 'text-[58px] w-[86px] text-center shrink-0' : 'text-5xl mb-6'} drop-shadow group-hover:scale-110 transition-transform">${t.icon}</div>
+            <div class="flex-1 min-w-0">
+                <h3 class="${mobilePortrait ? 'text-[30px] mb-2' : 'text-3xl mb-4'} font-bold text-white drop-shadow break-keep">${t.name}</h3>
+                <p class="${mobilePortrait ? 'text-[22px] leading-snug' : 'text-xl leading-relaxed'} text-slate-200 mt-auto drop-shadow break-keep">${t.desc}</p>
+            </div>
         </button>
     `).join('');
 
     let warningHtml = '';
     if ([3, 7, 11, 15].includes(state.stage)) {
-        warningHtml = `<div class="absolute top-10 left-1/2 transform -translate-x-1/2 w-full text-center z-20 pointer-events-none fade-in">
-            <h2 class="text-7xl font-bold text-red-500 animate-pulse drop-shadow-[0_0_15px_rgba(239,68,68,0.8)] tracking-widest title-font">WARNING! BOSS BATTLE</h2>
+        warningHtml = `<div class="absolute ${mobilePortrait ? 'top-5' : 'top-10'} left-1/2 transform -translate-x-1/2 w-full text-center z-20 pointer-events-none fade-in px-4">
+            <h2 class="${mobilePortrait ? 'text-[46px]' : 'text-7xl'} font-bold text-red-500 animate-pulse drop-shadow-[0_0_15px_rgba(239,68,68,0.8)] tracking-widest title-font">WARNING! BOSS BATTLE</h2>
         </div>`;
     } else if (state.stage === 19) {
-        warningHtml = `<div class="absolute top-10 left-1/2 transform -translate-x-1/2 w-full text-center z-20 pointer-events-none fade-in">
-            <h2 class="text-8xl font-bold text-yellow-500 animate-pulse drop-shadow-[0_0_20px_rgba(234,179,8,0.8)] tracking-widest title-font">FINAL BATTLE</h2>
+        warningHtml = `<div class="absolute ${mobilePortrait ? 'top-5' : 'top-10'} left-1/2 transform -translate-x-1/2 w-full text-center z-20 pointer-events-none fade-in px-4">
+            <h2 class="${mobilePortrait ? 'text-[50px]' : 'text-8xl'} font-bold text-yellow-500 animate-pulse drop-shadow-[0_0_20px_rgba(234,179,8,0.8)] tracking-widest title-font">FINAL BATTLE</h2>
         </div>`;
     }
 
     return audioBtn + warningHtml + `
         <div class="w-full h-full flex flex-col items-center justify-center ${transitionClass} bg-cover bg-center relative" style="background-image: url('${bgImage}');">
             <div class="absolute inset-0 bg-slate-900/80 z-0"></div>
-            <div class="z-10 relative flex flex-col h-full items-center justify-center w-full max-w-6xl mx-auto px-6">
-                <div class="text-center mb-12 mt-12">
-                    <div class="text-2xl text-red-300 font-bold mb-4 tracking-widest bg-red-900/50 inline-block px-4 py-2 rounded-full border border-red-500/50 backdrop-blur-sm">STAGE ${state.stage + 1}</div>
-                    <div class="emoji text-[120px] mb-6 drop-shadow-2xl opacity-90">${mon.icon}</div>
-                    <h2 class="text-6xl font-bold text-white title-font drop-shadow-lg mb-4 break-keep">야생의 ${mon.name} 발견!</h2>
-                    <p class="text-2xl text-slate-300 drop-shadow">보스전에 앞서 특별 작전을 선택하세요.</p>
+            <div class="z-10 relative flex flex-col h-full items-center ${mobilePortrait ? 'justify-start max-w-[660px] px-6 pt-[88px] pb-8 overflow-y-auto no-scrollbar' : 'justify-center max-w-6xl px-6'} w-full mx-auto">
+                <div class="text-center ${mobilePortrait ? 'mb-6 mt-2' : 'mb-12 mt-12'}">
+                    <div class="${mobilePortrait ? 'text-[20px]' : 'text-2xl'} text-red-300 font-bold mb-3 tracking-widest bg-red-900/50 inline-block px-4 py-2 rounded-full border border-red-500/50 backdrop-blur-sm">STAGE ${state.stage + 1}</div>
+                    <div class="emoji ${mobilePortrait ? 'text-[86px] mb-3' : 'text-[120px] mb-6'} drop-shadow-2xl opacity-90">${mon.icon}</div>
+                    <h2 class="${mobilePortrait ? 'text-[44px]' : 'text-6xl'} font-bold text-white title-font drop-shadow-lg mb-3 break-keep">야생의 ${mon.name} 발견!</h2>
+                    <p class="${mobilePortrait ? 'text-[22px]' : 'text-2xl'} text-slate-300 drop-shadow break-keep">보스전에 앞서 특별 작전을 선택하세요.</p>
                 </div>
-                <div class="grid grid-cols-3 gap-8 w-full pb-4">
+                <div class="${mobilePortrait ? 'flex flex-col gap-4' : 'grid grid-cols-3 gap-8'} w-full pb-4">
                     ${tacticsHtml}
-                </div>
-            </div>
-        </div>
-    `;
-}
-
-
-function renderBattleMobile(audioBtn, transitionClass, bgImage) {
-    const mon = state.monster; const p = state.player;
-    const monHpPercent = Math.max(0, (state.monsterHp / mon.hp) * 100);
-    const pHpPercent = Math.max(0, (p.hp / p.maxHp) * 100);
-
-    let hintText = state.monsterHintText || pickMonsterHint(mon, state.monsterNextMove);
-    let showVisualBubble = false; let visualBubbleIcon = '';
-
-    if (state.crystalHintActive && state.turnCount === 0) {
-        hintText = `<span class="text-pink-400 font-bold drop-shadow">🔮 [수정구] 적 행동 확인!</span>`;
-        showVisualBubble = true; visualBubbleIcon = MOVE_ICONS[state.monsterNextMove];
-    } else if (state.prophecyHintActive) {
-        hintText = `<span class="text-purple-300 font-bold drop-shadow">✨ [예언] 적 행동 확인!</span>`;
-        showVisualBubble = true; visualBubbleIcon = MOVE_ICONS[state.monsterNextMove];
-    } else if (state.player.tactic === 'scout' && state.turnCount === 0) {
-        hintText = `<span class="text-pink-400 font-bold drop-shadow">🔭 [정찰] 첫 행동 확인!</span>`;
-        showVisualBubble = true; visualBubbleIcon = MOVE_ICONS[state.monsterNextMove];
-    } else if (state.player.tactic === 'observe' && state.turnCount === 0) {
-        hintText = `<span class="text-blue-300 font-bold drop-shadow">👁️ [관찰] 첫 행동 확인!</span>`;
-        showVisualBubble = true; visualBubbleIcon = MOVE_ICONS[state.monsterNextMove];
-    } else {
-        hintText = `💡 ${hintText}`;
-    }
-
-    const currentTactic = TACTICS.find(t => t.id === p.tactic);
-    let tacticBadge = '';
-    if (currentTactic && !p.tacticUsed && !['observe', 'lucky'].includes(p.tactic)) {
-        tacticBadge = `<span class="text-[24px] font-bold text-slate-100 bg-slate-700/80 border-2 border-slate-400 px-4 py-2 rounded-full shadow-md backdrop-blur-sm">${currentTactic.icon} ${currentTactic.name}</span>`;
-    }
-
-    const monsterFloating = state.floatingTexts.filter(f=>f.target==='monster').map(f => `<div class="anim-float font-black ${f.colorClass}" style="left:50%; top:27%; transform:translate(-50%, -50%); font-size:44px;">${f.text}</div>`).join('');
-    const playerFloating = state.floatingTexts.filter(f=>f.target==='player').map(f => `<div class="anim-float font-black ${f.colorClass}" style="left:50%; top:54%; transform:translate(-50%, -50%); font-size:40px;">${f.text}</div>`).join('');
-    const validAnimStates = ['idle', 'attack', 'draw', 'hit'];
-    const playerAnimState = validAnimStates.includes(p.animState) ? p.animState : 'idle';
-    const playerImageSrc = `./assets_hero/${p.cls.imgPrefix}_${playerAnimState}.png`;
-    const playerIdleSrc = `./assets_hero/${p.cls.imgPrefix}_idle.png`;
-
-    return audioBtn + `
-        <div class="h-full w-full flex flex-col overflow-hidden bg-cover bg-center relative ${transitionClass}" style="background-image: url('${bgImage}');">
-            <div class="absolute inset-0 bg-slate-900/65 z-0"></div>
-            ${monsterFloating}
-            ${playerFloating}
-
-            <div class="relative z-10 flex flex-col h-full w-full p-5 gap-4">
-                <div class="shrink-0 bg-slate-900/70 backdrop-blur-md border-4 border-slate-600 rounded-[36px] p-4 ${state.shakeTarget === 'monster' ? 'anim-shake' : ''}">
-                    <div class="flex items-center justify-between mb-3 pr-[96px]">
-                        <div class="text-[26px] font-bold text-red-300 bg-red-950/70 px-4 py-2 rounded-full border border-red-500/50">STAGE ${state.stage + 1} / 20</div>
-                        <div class="text-[22px] text-slate-300 font-bold">${mon.name}</div>
-                    </div>
-                    <div class="flex items-center gap-4">
-                        <div class="relative shrink-0 w-[165px] h-[165px] flex items-center justify-center">
-                            <div class="emoji text-[125px] drop-shadow-2xl opacity-95">${mon.icon}</div>
-                            ${showVisualBubble ? `<div class="absolute -top-4 -right-5 bg-white/95 rounded-full p-3 text-[48px] shadow-2xl border-4 border-slate-300 anim-bubble z-20 w-[82px] h-[82px] flex items-center justify-center">${visualBubbleIcon}</div>` : ''}
-                        </div>
-                        <div class="flex-1 min-w-0">
-                            <div class="text-[34px] font-bold text-white title-font drop-shadow-lg mb-3 break-keep">
-                                ${mon.name}
-                                ${state.monsterStatus && state.monsterStatus.type === 'sealed' ? '<span class="text-[20px] bg-red-600 px-3 py-1 rounded-lg ml-2">봉인됨</span>' : ''}
-                                ${state.monsterStatus && state.monsterStatus.type === 'stunned' ? '<span class="text-[20px] bg-yellow-500 px-3 py-1 rounded-lg text-yellow-950 ml-2">기절</span>' : ''}
-                            </div>
-                            <div class="h-9 bg-slate-950/90 rounded-full overflow-hidden border-4 border-slate-600 relative shadow-inner">
-                                <div class="h-full bg-red-500 transition-all duration-300" style="width: ${monHpPercent}%"></div>
-                                <div class="absolute inset-0 flex items-center justify-center text-[20px] font-bold text-white drop-shadow-md">${Math.max(0, state.monsterHp)} / ${mon.hp}</div>
-                            </div>
-                            <div class="mt-3 bg-slate-800/90 border-2 border-slate-500 rounded-2xl p-3 text-[22px] leading-snug text-center min-h-[72px] flex items-center justify-center break-keep">
-                                ${hintText}
-                            </div>
-                        </div>
-                    </div>
-                </div>
-
-                <div class="shrink-0 h-[210px] bg-slate-950/75 backdrop-blur-md border-4 border-slate-700 rounded-[30px] p-4 overflow-y-auto no-scrollbar text-[21px] flex flex-col-reverse gap-2 leading-snug shadow-inner">
-                    ${state.log.map(l => `<div>${l}</div>`).join('')}
-                </div>
-
-                <div class="shrink-0 bg-slate-900/75 backdrop-blur-md border-4 border-slate-600 rounded-[36px] p-4 ${state.shakeTarget === 'player' ? 'anim-shake' : ''}">
-                    <div class="flex gap-4 items-center">
-                        <img onerror="if(!this.dataset.fallback){this.dataset.fallback='1'; this.src='${playerIdleSrc}';} else { this.style.display='none'; }" src="${playerImageSrc}" class="border-4 border-slate-500 rounded-3xl shrink-0 shadow-lg bg-white object-cover ${playerAnimState !== 'idle' ? 'anim-shake' : ''}" style="width: 150px; height: 150px; image-rendering: pixelated;" alt="Player">
-                        <div class="flex-1 min-w-0">
-                            <div class="text-[32px] font-bold text-blue-300 title-font leading-tight mb-2 drop-shadow break-keep">Lv.${p.level} ${p.cls.name}</div>
-                            <div class="text-[21px] text-slate-200 font-bold bg-slate-950/80 inline-block px-3 py-2 rounded-xl border border-slate-600 shadow-inner mb-3">
-                                ⚔️ ${p.atk} | 💰 ${p.gold} | 💣 ${p.inventory.bomb} | 💥 ${p.inventory.flash}
-                            </div>
-                            <div class="h-9 bg-slate-950/90 rounded-full overflow-hidden border-4 border-slate-600 relative shadow-inner mb-3">
-                                <div class="h-full ${p.hp <= p.maxHp * 0.3 ? 'bg-red-500 animate-pulse' : 'bg-green-500'} transition-all duration-300" style="width: ${pHpPercent}%"></div>
-                                <div class="absolute inset-0 flex items-center justify-center text-[20px] font-bold text-white drop-shadow-md">❤️ ${Math.max(0, p.hp)} / ${p.maxHp}</div>
-                            </div>
-                            <div class="flex gap-2 h-8">
-                                ${Array.from({length: p.maxEnergy}).map((_, i) => `<div class="flex-1 border-2 border-slate-600 rounded-lg ${i < p.energy ? 'bg-yellow-400 shadow-[0_0_15px_rgba(250,204,21,0.6)]' : 'bg-slate-950/80'}"></div>`).join('')}
-                            </div>
-                        </div>
-                    </div>
-                    <div class="flex flex-wrap gap-2 mt-3 min-h-[34px]">
-                        ${tacticBadge}
-                        ${p.buff ? `<span class="text-[22px] font-bold text-yellow-100 bg-yellow-700/80 border-2 border-yellow-500 px-4 py-2 rounded-full shadow-md animate-pulse backdrop-blur-sm">🌟 스킬 장전</span>` : ''}
-                    </div>
-                </div>
-
-                <div class="grid grid-cols-2 gap-4 flex-1 min-h-0 pb-1">
-                    <button onclick="playTurn('scissors')" class="bg-slate-800/90 backdrop-blur-sm hover:bg-slate-700 border-4 border-slate-500 rounded-[30px] shadow-xl active:scale-95 transition-all flex flex-col items-center justify-center gap-3 focus:outline-none">
-                        <span class="text-[64px] drop-shadow-md">✌️</span>
-                        <span class="text-[28px] text-slate-100 font-bold drop-shadow">쌍검 베기</span>
-                    </button>
-                    <button onclick="playTurn('rock')" class="bg-slate-800/90 backdrop-blur-sm hover:bg-slate-700 border-4 border-slate-500 rounded-[30px] shadow-xl active:scale-95 transition-all flex flex-col items-center justify-center gap-3 focus:outline-none">
-                        <span class="text-[64px] drop-shadow-md">✊</span>
-                        <span class="text-[28px] text-slate-100 font-bold drop-shadow">방패 강타</span>
-                    </button>
-                    <button onclick="playTurn('paper')" class="bg-slate-800/90 backdrop-blur-sm hover:bg-slate-700 border-4 border-slate-500 rounded-[30px] shadow-xl active:scale-95 transition-all flex flex-col items-center justify-center gap-3 focus:outline-none">
-                        <span class="text-[64px] drop-shadow-md">✋</span>
-                        <span class="text-[28px] text-slate-100 font-bold drop-shadow">마법 장막</span>
-                    </button>
-                    <button onclick="useSkill()" class="${p.energy >= (p.activeBuff==='mana_surge'?0:3) ? 'bg-purple-600/90 hover:bg-purple-500 border-purple-400' : 'bg-slate-800/90 text-slate-500 border-slate-600'} backdrop-blur-sm border-4 rounded-[30px] shadow-xl active:scale-95 transition-all flex flex-col items-center justify-center gap-3 focus:outline-none">
-                        <span class="text-[64px] ${p.energy >= (p.activeBuff==='mana_surge'?0:3) ? 'drop-shadow-md' : 'opacity-50'}">✨</span>
-                        <span class="text-[28px] font-bold ${p.energy >= (p.activeBuff==='mana_surge'?0:3) ? 'text-white drop-shadow' : 'text-slate-500'}">${p.activeBuff==='mana_surge'?'스킬(0)':'스킬(3)'}</span>
-                    </button>
                 </div>
             </div>
         </div>
@@ -2077,6 +2009,7 @@ function render() {
 
 // 초기화
 window.onload = () => { 
+    lastPortraitLayoutMode = isMobilePortraitMode();
     render();
     requestAnimationFrame(adjustScale);
 };
