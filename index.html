@@ -1503,8 +1503,115 @@ function renderTacticSelect(audioBtn, transitionClass, bgImage) {
     `;
 }
 
+function renderBattleMobile(audioBtn, transitionClass, bgImage) {
+    const mon = state.monster; const p = state.player;
+    const monHpPercent = Math.max(0, (state.monsterHp / mon.hp) * 100);
+    const pHpPercent = Math.max(0, (p.hp / p.maxHp) * 100);
+
+    let hintText = state.monsterHintText || pickMonsterHint(mon, state.monsterNextMove);
+    let showVisualBubble = false; let visualBubbleIcon = '';
+
+    if (state.crystalHintActive && state.turnCount === 0) {
+        hintText = `<span class="text-pink-400 font-bold drop-shadow">🔮 [수정구] 적의 다음 패가 보입니다!</span>`;
+        showVisualBubble = true; visualBubbleIcon = MOVE_ICONS[state.monsterNextMove];
+    } else if (state.prophecyHintActive) {
+        hintText = `<span class="text-purple-300 font-bold drop-shadow">✨ [예언] 적의 다음 행동을 읽었습니다!</span>`;
+        showVisualBubble = true; visualBubbleIcon = MOVE_ICONS[state.monsterNextMove];
+    } else if (state.player.tactic === 'scout' && state.turnCount === 0) {
+        hintText = `<span class="text-pink-400 font-bold drop-shadow">🔭 [정찰] 적의 첫 공격을 꿰뚫어봅니다.</span>`;
+        showVisualBubble = true; visualBubbleIcon = MOVE_ICONS[state.monsterNextMove];
+    } else if (state.player.tactic === 'observe' && state.turnCount === 0) {
+        hintText = `<span class="text-blue-300 font-bold drop-shadow">👁️ [관찰] 적의 행동을 정확히 예측했습니다.</span>`;
+        showVisualBubble = true; visualBubbleIcon = MOVE_ICONS[state.monsterNextMove];
+    } else {
+        hintText = `💡 ${hintText}`;
+    }
+
+    const currentTactic = TACTICS.find(t => t.id === p.tactic);
+    let tacticBadge = '';
+    if (currentTactic && !p.tacticUsed && !['observe', 'lucky'].includes(p.tactic)) {
+        tacticBadge = `<span class="text-[20px] font-bold text-slate-100 bg-slate-700/80 border-2 border-slate-400 px-3 py-1 rounded-full shadow-md backdrop-blur-sm break-keep">${currentTactic.icon} ${currentTactic.name} 대기</span>`;
+    }
+
+    const monsterFloating = state.floatingTexts.filter(f=>f.target==='monster').map(f => `<div class="anim-float font-black text-[42px] ${f.colorClass}" style="left:50%; top:34%; transform:translate(-50%, -50%);">${f.text}</div>`).join('');
+    const playerFloating = state.floatingTexts.filter(f=>f.target==='player').map(f => `<div class="anim-float font-black text-[38px] ${f.colorClass}" style="left:50%; top:54%; transform:translate(-50%, -50%);">${f.text}</div>`).join('');
+    const validAnimStates = ['idle', 'attack', 'draw', 'hit'];
+    const playerAnimState = validAnimStates.includes(p.animState) ? p.animState : 'idle';
+    const playerImageSrc = `./assets_hero/${p.cls.imgPrefix}_${playerAnimState}.png`;
+    const playerIdleSrc = `./assets_hero/${p.cls.imgPrefix}_idle.png`;
+
+    return audioBtn + `
+        <div class="h-full w-full flex flex-col overflow-hidden bg-cover bg-center relative ${transitionClass}" style="background-image: url('${bgImage}');">
+            <div class="absolute inset-0 bg-slate-900/65 z-0"></div>
+            <div class="relative z-10 h-full w-full flex flex-col px-5 pt-[86px] pb-5 gap-4">
+                <div class="shrink-0 bg-slate-900/70 backdrop-blur-md border-4 border-slate-600 rounded-[2rem] p-4 shadow-2xl ${state.shakeTarget === 'monster' ? 'anim-shake' : ''}">
+                    ${monsterFloating}
+                    <div class="flex items-center gap-4">
+                        <div class="relative shrink-0">
+                            <div class="emoji text-[82px] leading-none drop-shadow-2xl">${mon.icon}</div>
+                            ${showVisualBubble ? `<div class="absolute -top-5 -right-6 bg-white/95 rounded-full text-[42px] shadow-2xl border-4 border-slate-300 anim-bubble z-20 flex items-center justify-center w-[78px] h-[78px]">${visualBubbleIcon}</div>` : ''}
+                        </div>
+                        <div class="flex-1 min-w-0">
+                            <div class="text-[20px] font-bold text-slate-300 tracking-widest">STAGE ${state.stage + 1} / 20</div>
+                            <div class="text-[34px] font-bold text-white title-font drop-shadow break-keep leading-tight">${mon.name}</div>
+                            <div class="h-8 bg-slate-950/80 rounded-full mt-3 overflow-hidden border-4 border-slate-600 shadow-inner relative">
+                                <div class="h-full bg-red-500 transition-all duration-300" style="width: ${monHpPercent}%"></div>
+                                <div class="absolute inset-0 flex items-center justify-center text-[18px] font-bold text-white drop-shadow-md">${Math.max(0, state.monsterHp)} / ${mon.hp}</div>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="mt-4 bg-slate-800/85 border-2 border-slate-500 rounded-2xl px-4 py-3 text-[22px] leading-snug text-center shadow-inner break-keep min-h-[82px] flex items-center justify-center">${hintText}</div>
+                </div>
+
+                <div class="shrink-0 bg-slate-900/70 backdrop-blur-md border-4 border-slate-600 rounded-[2rem] p-4 shadow-2xl ${state.shakeTarget === 'player' ? 'anim-shake' : ''}">
+                    ${playerFloating}
+                    <div class="flex items-center gap-4">
+                        <img onerror="if(!this.dataset.fallback){this.dataset.fallback='1'; this.src='${playerIdleSrc}';} else { this.style.display='none'; }" src="${playerImageSrc}" class="border-4 border-slate-500 rounded-3xl shrink-0 shadow-lg bg-white object-cover ${playerAnimState !== 'idle' ? 'anim-shake' : ''}" style="width: 108px; height: 108px; image-rendering: pixelated;" alt="Player">
+                        <div class="flex-1 min-w-0">
+                            <div class="text-[30px] font-bold text-blue-300 title-font leading-tight drop-shadow break-keep">Lv.${p.level} ${p.cls.name}</div>
+                            <div class="text-[17px] text-slate-200 font-bold bg-slate-950/80 inline-block px-3 py-1 rounded-xl border border-slate-600 shadow-inner mt-2">⚔️ ${p.atk} | 💰 ${p.gold} | 💣 ${p.inventory.bomb} | 💥 ${p.inventory.flash}</div>
+                        </div>
+                    </div>
+
+                    <div class="mt-4">
+                        <div class="text-[19px] font-bold text-slate-200 mb-1">❤️ 생명력</div>
+                        <div class="h-8 bg-slate-950/80 rounded-full overflow-hidden border-4 border-slate-600 relative shadow-inner">
+                            <div class="h-full ${p.hp <= p.maxHp * 0.3 ? 'bg-red-500 animate-pulse' : 'bg-green-500'} transition-all duration-300" style="width: ${pHpPercent}%"></div>
+                            <div class="absolute inset-0 flex items-center justify-center text-[19px] font-bold text-white drop-shadow-md">${Math.max(0, p.hp)} / ${p.maxHp}</div>
+                        </div>
+                    </div>
+
+                    <div class="mt-3">
+                        <div class="text-[19px] font-bold text-slate-200 mb-1">⚡ 기력</div>
+                        <div class="flex gap-2 h-7">
+                            ${Array.from({length: p.maxEnergy}).map((_, i) => `<div class="flex-1 border-2 border-slate-600 rounded-lg ${i < p.energy ? 'bg-yellow-400 shadow-[0_0_15px_rgba(250,204,21,0.6)]' : 'bg-slate-950/80'}"></div>`).join('')}
+                        </div>
+                    </div>
+
+                    <div class="flex flex-wrap gap-2 mt-3 min-h-[30px]">
+                        ${tacticBadge}
+                        ${p.buff ? `<span class="text-[20px] font-bold text-yellow-100 bg-yellow-700/80 border-2 border-yellow-500 px-3 py-1 rounded-full shadow-md animate-pulse backdrop-blur-sm">🌟 스킬 장전</span>` : ''}
+                    </div>
+                </div>
+
+                <div class="shrink-0 grid grid-cols-4 gap-3">
+                    <button onclick="playTurn('scissors')" class="bg-slate-800/90 border-4 border-slate-500 rounded-3xl py-4 shadow-xl active:scale-95 transition-all flex flex-col items-center justify-center gap-1 focus:outline-none"><span class="text-[48px] leading-none">✌️</span><span class="text-[18px] text-slate-100 font-bold break-keep">쌍검</span></button>
+                    <button onclick="playTurn('rock')" class="bg-slate-800/90 border-4 border-slate-500 rounded-3xl py-4 shadow-xl active:scale-95 transition-all flex flex-col items-center justify-center gap-1 focus:outline-none"><span class="text-[48px] leading-none">✊</span><span class="text-[18px] text-slate-100 font-bold break-keep">방패</span></button>
+                    <button onclick="playTurn('paper')" class="bg-slate-800/90 border-4 border-slate-500 rounded-3xl py-4 shadow-xl active:scale-95 transition-all flex flex-col items-center justify-center gap-1 focus:outline-none"><span class="text-[48px] leading-none">✋</span><span class="text-[18px] text-slate-100 font-bold break-keep">장막</span></button>
+                    <button onclick="useSkill()" class="${p.energy >= (p.activeBuff==='mana_surge'?0:3) ? 'bg-purple-600/95 border-purple-400' : 'bg-slate-800/90 text-slate-500 border-slate-600'} border-4 rounded-3xl py-4 shadow-xl active:scale-95 transition-all flex flex-col items-center justify-center gap-1 focus:outline-none"><span class="text-[48px] leading-none ${p.energy >= (p.activeBuff==='mana_surge'?0:3) ? '' : 'opacity-50'}">✨</span><span class="text-[18px] font-bold break-keep">${p.activeBuff==='mana_surge'?'스킬0':'스킬3'}</span></button>
+                </div>
+
+                <div class="flex-1 min-h-0 bg-slate-950/70 backdrop-blur-md border-4 border-slate-700 rounded-[1.5rem] p-3 overflow-y-auto no-scrollbar text-[18px] leading-snug shadow-inner flex flex-col-reverse gap-1">
+                    ${state.log.map(l => `<div>${l}</div>`).join('')}
+                </div>
+            </div>
+        </div>
+    `;
+}
+
 function renderBattle(audioBtn, transitionClass, bgImage) {
     if (isMobilePortraitMode()) return renderBattleMobile(audioBtn, transitionClass, bgImage);
+
     const mon = state.monster; const p = state.player;
     const monHpPercent = Math.max(0, (state.monsterHp / mon.hp) * 100);
     const pHpPercent = Math.max(0, (p.hp / p.maxHp) * 100);
