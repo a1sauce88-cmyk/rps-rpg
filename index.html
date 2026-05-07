@@ -127,10 +127,10 @@
             text-rendering: optimizeLegibility;
         }
 
-        /* 모바일 세로 모드도 지원합니다. 기존 회전 안내는 숨기고 게임 화면을 유지합니다. */
+        /* 가로 모드 강제: 세로 화면에서는 게임을 숨기고 회전 안내만 표시 */
         @media screen and (orientation: portrait) {
-            #portrait-warning { display: none !important; }
-            #main-wrapper { display: flex !important; align-items: center !important; justify-content: center !important; }
+            #portrait-warning { display: flex !important; }
+            #main-wrapper { display: none !important; }
         }
 
         @media screen and (orientation: landscape) {
@@ -176,11 +176,15 @@ function getViewportSize() {
     };
 }
 
-function isMobilePortraitMode() {
+function isPortraitMode() {
     const { width, height } = getViewportSize();
-    const ua = navigator.userAgent || '';
-    const isTouchMobile = /Android|iPhone|iPod|Mobile/i.test(ua) || (navigator.maxTouchPoints > 1 && Math.min(width, height) <= 820);
-    return isTouchMobile && height > width;
+    return height > width;
+}
+
+function isMobilePortraitMode() {
+    // 기존 렌더 함수들이 참조하므로 이름은 유지합니다.
+    // 이제 세로 UI를 따로 만들지 않고, 모든 세로 화면에서 회전 안내만 표시합니다.
+    return isPortraitMode();
 }
 
 function adjustScale() {
@@ -191,20 +195,19 @@ function adjustScale() {
     const { width: winW, height: winH } = getViewportSize();
     const safeW = Math.max(1, winW);
     const safeH = Math.max(1, winH);
-    const mobilePortrait = isMobilePortraitMode();
 
-    // 모바일 세로에서는 720x1280 세로 캔버스,
-    // PC/태블릿 가로에서는 1280x720 가로 캔버스를 유지합니다.
-    const baseW = mobilePortrait ? 720 : BASE_WIDTH;
-    const baseH = mobilePortrait ? 1280 : BASE_HEIGHT;
+    // 게임 본편은 항상 1280x720 가로 캔버스를 기준으로 유지합니다.
+    // 세로 화면에서는 CSS가 #main-wrapper를 숨기고 #portrait-warning만 보여줍니다.
+    const baseW = BASE_WIDTH;
+    const baseH = BASE_HEIGHT;
 
     container.style.width = `${baseW}px`;
     container.style.height = `${baseH}px`;
-    container.style.transform = 'none';
     container.style.left = 'auto';
     container.style.top = 'auto';
     container.style.position = 'relative';
-    document.body.classList.toggle('mobile-portrait', mobilePortrait);
+    container.style.transformOrigin = 'center center';
+    document.body.classList.toggle('mobile-portrait', false);
 
     if (wrapper) {
         wrapper.style.overflow = 'hidden';
@@ -212,29 +215,26 @@ function adjustScale() {
         wrapper.style.alignItems = 'center';
         wrapper.style.justifyContent = 'center';
         wrapper.style.placeItems = 'center';
+        wrapper.style.width = '100vw';
+        wrapper.style.height = '100dvh';
     }
 
+    // 화면 안에 16:9 게임 캔버스가 잘리지 않도록 여유값을 살짝 둡니다.
     const fit = Math.min(safeW / baseW, safeH / baseH) * 0.995;
 
-    // 핵심 수정: transform: scale() 대신 zoom 사용.
-    // 텍스트가 0.2초 뒤 흐려지는 현상을 크게 줄입니다.
-    container.style.zoom = fit;
-
-    // 일부 브라우저에서 zoom을 무시할 때만 최소 fallback을 사용합니다.
-    // 일반 PC Chrome/Edge, 모바일 Chrome/Safari에서는 zoom이 우선 적용됩니다.
-    if (container.style.zoom === '') {
+    // Chrome/Edge/모바일 브라우저에서는 zoom이 텍스트 선명도에 유리합니다.
+    // zoom 미지원 환경에서는 transform scale로 동일 비율을 보장합니다.
+    if (window.CSS && CSS.supports && CSS.supports('zoom', '1')) {
+        container.style.zoom = fit;
+        container.style.transform = 'none';
+    } else {
+        container.style.zoom = '1';
         container.style.transform = `scale(${fit})`;
     }
 }
 
-let lastPortraitLayoutMode = null;
 function handleViewportChange() {
-    const mode = isMobilePortraitMode();
     adjustScale();
-    if (lastPortraitLayoutMode !== null && lastPortraitLayoutMode !== mode) {
-        render();
-    }
-    lastPortraitLayoutMode = mode;
 }
 
 window.addEventListener('resize', handleViewportChange);
@@ -2077,7 +2077,6 @@ function render() {
 
 // 초기화
 window.onload = () => { 
-    lastPortraitLayoutMode = isMobilePortraitMode();
     render();
     requestAnimationFrame(adjustScale);
 };
